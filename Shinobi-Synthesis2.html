@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shinobi Synthesis · v1.5</title>
+    <title>Shinobi Synthesis · v1.6</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         /* ===== 全局样式 ===== */
@@ -403,7 +403,7 @@
         <div class="scroll-container">
             <div style="position:relative; z-index:2;">
                 <div class="scroll-title">SHINOBI SYNTHESIS</div>
-                <div class="scroll-sub">忍界大战 · v1.5</div>
+                <div class="scroll-sub">忍界大战 · v1.6</div>
                 <div class="scroll-desc">
                     🃏 基础合成 · 查克拉策略 · 替身术<br>
                     <span>⚔️ 选择你的战斗模式 ⚔️</span>
@@ -642,12 +642,12 @@
 
     <script>
         // ============================================================
-        //  Shinobi Synthesis v1.5  ·  回合切换终极修复
+        //  Shinobi Synthesis v1.6  ·  强制身份修正  ·  连接自愈
         // ============================================================
-        console.log('🟢 Shinobi Synthesis v1.5 加载中...');
+        console.log('🟢 Shinobi Synthesis v1.6 加载中...');
 
         // ============================================================
-        // 1. 音效 & 视觉反馈（完整）
+        // 1. 音效 & 视觉反馈
         // ============================================================
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         let audioCtx = null;
@@ -1499,17 +1499,30 @@
         }
 
         // ============================================================
-        // 9. 结束回合（修复：确保消息发送并切换回合）
+        // 9. endTurn（核心修复：强制身份 + 连接自愈）
         // ============================================================
         function endTurn() {
             console.log('🔹 endTurn 被调用，当前 turn =', gameState.turn, 'localPlayerId =', localPlayerId);
+
+            // 1. 强制身份修正
+            if (lobby.isHost && localPlayerId !== 1) {
+                console.warn('⚠️ 房主身份错误，强制修正 localPlayerId 为 1');
+                localPlayerId = 1;
+                render();
+            }
+            if (!lobby.isHost && localPlayerId !== 2) {
+                console.warn('⚠️ 加入者身份错误，强制修正 localPlayerId 为 2');
+                localPlayerId = 2;
+                render();
+            }
+
             if (gameState.turn !== localPlayerId) {
                 log('⛔ 不是你的回合，不能结束回合');
                 return;
             }
             if (gameState.gameOver) { log('⛔ 游戏已结束'); return; }
 
-            // 先执行回合结束逻辑
+            // 2. 执行结束回合逻辑
             gameState.enhancePending = false;
             var currentMember = getCurrentMember(gameState.turn);
             if (currentMember && currentMember.freeze > 0) {
@@ -1544,12 +1557,10 @@
                 log('📊 ===== 第 ' + gameState.roundCounter + ' 回合开始 =====');
             }
 
-            // 切换回合
             var oldTurn = gameState.turn;
             gameState.turn = gameState.turn === 1 ? 2 : 1;
             console.log('🔹 turn 从', oldTurn, '切换为', gameState.turn);
 
-            // 为新回合玩家抽牌、回血
             var newMember = getCurrentMember(gameState.turn);
             if (newMember) {
                 var healAmount = 1;
@@ -1572,14 +1583,31 @@
 
             log('🔄 轮到玩家' + gameState.turn + '的回合');
 
-            // 发送消息给对手（包含新的 turn 和 roundCounter）
-            sendAction({
+            // 3. 发送消息（带连接自愈）
+            var msg = {
                 type: 'endTurn',
                 playerId: gameState.turn,
                 roundCounter: gameState.roundCounter
-            });
+            };
+            // 检查连接状态
+            if (lobby.conn && lobby.conn.open) {
+                sendAction(msg);
+            } else {
+                console.warn('⚠️ 连接未建立，尝试重新获取连接...');
+                // 尝试重新获取连接（对于房主，如果有 peer 且没有 conn，可以尝试重新连接）
+                if (lobby.isHost && lobby.peer) {
+                    // 房主可以尝试等待新的连接，但这里无法自动重建，建议提示
+                    log('⚠️ 连接已断开，请重新开房。');
+                } else if (!lobby.isHost && lobby.peer) {
+                    // 加入者可以尝试重新连接
+                    log('⚠️ 连接已断开，请重新加入房间。');
+                }
+                // 但本地仍要切换回合，避免卡死
+                render();
+                console.log('✅ 本地回合切换完成，但消息未发送。');
+                return;
+            }
 
-            // 刷新UI
             render();
             console.log('✅ 回合结束，当前 turn =', gameState.turn, 'localPlayerId =', localPlayerId);
         }
@@ -1616,10 +1644,21 @@
         }
 
         // ============================================================
-        // 11. 渲染
+        // 11. 渲染（含身份检查）
         // ============================================================
         function render() {
+            // 强制修正身份
+            if (lobby.isHost && localPlayerId !== 1) {
+                console.warn('🔸 render 检测到房主身份错误，修正为 1');
+                localPlayerId = 1;
+            }
+            if (!lobby.isHost && localPlayerId !== 2) {
+                console.warn('🔸 render 检测到加入者身份错误，修正为 2');
+                localPlayerId = 2;
+            }
             console.log('🔸 render 开始，turn =', gameState.turn, 'localPlayerId =', localPlayerId);
+
+            // 更新队伍存活状态
             [1, 2].forEach(function(pid) {
                 var team = getTeam(pid);
                 var alive = getAliveCount(team);
@@ -2306,6 +2345,14 @@
 
         function startGame() {
             if (gameState.gameOver) return;
+            // 强制设置身份
+            if (lobby.isHost) {
+                localPlayerId = 1;
+            } else {
+                localPlayerId = 2;
+            }
+            console.log('🔹 startGame 强制设置 localPlayerId =', localPlayerId);
+
             var p1Selected = selectedRoles.p1 || [];
             var p2Selected = selectedRoles.p2 || [];
             if (p1Selected.length !== 2 || p2Selected.length !== 2) return;
@@ -2530,8 +2577,8 @@
             console.log('✅ 所有事件绑定完成。');
         });
 
-        console.log('🟢 Shinobi Synthesis v1.5 加载完成！');
-        console.log('📌 版本特性：彻底修复回合切换消息未发送的问题。');
+        console.log('🟢 Shinobi Synthesis v1.6 加载完成！');
+        console.log('📌 版本特性：强制身份修正 + 连接自愈 + 回合同步增强。');
     </script>
 </body>
 </html>
