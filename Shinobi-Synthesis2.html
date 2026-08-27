@@ -1267,7 +1267,7 @@
         }
 
         // ============================================================
-        // 11. 联机通信层（含选人同步）
+        // 11. 联机通信层（含永久监听器修复）
         // ============================================================
         function sendAction(action) {
             if (lobby.conn && lobby.conn.open) {
@@ -1396,7 +1396,7 @@
         }
 
         // ============================================================
-        // 12. 大厅管理
+        // 12. 大厅管理（含永久监听器）
         // ============================================================
         function updateLobbyUI(message) {
             const label = document.getElementById('lobby-status-label');
@@ -1441,23 +1441,8 @@
                 document.getElementById('lobby-message').textContent = '你已经在房间中。';
                 return;
             }
-            // 尝试寻找空闲房间（简化版，直接尝试创建固定ID）
-            for (let i = 0; i < MAX_ROOMS; i++) {
-                const id = ROOM_IDS[i];
-                const testPeer = new Peer(id, { debug: 0 });
-                testPeer.on('open', () => {
-                    testPeer.destroy();
-                    doCreateRoom(i);
-                });
-                testPeer.on('error', (err) => {
-                    if (i === MAX_ROOMS - 1) {
-                        document.getElementById('lobby-message').textContent = '所有房间已满，请稍后再试。';
-                    }
-                });
-                // 只尝试第一个空闲的，由于异步，这里用break会导致只检查第一个，改用标志
-                // 实际用递归更合理，这里简化，只试第一个
-                break;
-            }
+            // 简化：直接尝试创建房间0（实际可扩展）
+            doCreateRoom(0);
         }
 
         function doCreateRoom(index) {
@@ -1478,25 +1463,32 @@
                     lobby.conn = conn;
                     conn.on('open', () => {
                         let verified = false;
-                        const dataHandler = (data) => {
+                        // 临时认证监听
+                        const authHandler = (data) => {
                             try {
                                 const msg = JSON.parse(data);
-                                console.log('📨 房主收到:', msg);
+                                console.log('📨 房主收到认证消息:', msg);
                                 if (msg.type === 'auth' && msg.password === password) {
                                     verified = true;
                                     conn.send(JSON.stringify({ type: 'auth_ok' }));
-                                    conn.off('data', dataHandler);
+                                    // 移除认证监听
+                                    conn.off('data', authHandler);
+                                    // 添加永久监听器处理后续所有消息
+                                    conn.on('data', (data) => {
+                                        try {
+                                            const msg = JSON.parse(data);
+                                            handleRemoteAction(msg);
+                                        } catch (e) { console.error('解析错误:', e); }
+                                    });
                                     lobby.gameStarted = true;
                                     startRoleSelection('host');
                                 } else if (msg.type === 'auth') {
                                     conn.send(JSON.stringify({ type: 'auth_fail' }));
                                     conn.close();
-                                } else {
-                                    handleRemoteAction(msg);
                                 }
                             } catch (e) { console.error('解析错误:', e); }
                         };
-                        conn.on('data', dataHandler);
+                        conn.on('data', authHandler);
                         setTimeout(() => {
                             if (!verified) {
                                 conn.close();
@@ -1549,13 +1541,22 @@
                 localPlayerId = 2;
                 updateLobbyUI('正在连接...');
                 conn.on('open', () => {
+                    // 发送密码
                     conn.send(JSON.stringify({ type: 'auth', password: password }));
-                    const dataHandler = (data) => {
+                    // 监听认证响应
+                    const authHandler = (data) => {
                         try {
                             const msg = JSON.parse(data);
-                            console.log('📨 加入者收到:', msg);
+                            console.log('📨 加入者收到认证响应:', msg);
                             if (msg.type === 'auth_ok') {
-                                conn.off('data', dataHandler);
+                                conn.off('data', authHandler);
+                                // 添加永久监听器
+                                conn.on('data', (data) => {
+                                    try {
+                                        const msg = JSON.parse(data);
+                                        handleRemoteAction(msg);
+                                    } catch (e) { console.error('解析错误:', e); }
+                                });
                                 lobby.gameStarted = true;
                                 startRoleSelection('guest');
                             } else if (msg.type === 'auth_fail') {
@@ -1563,12 +1564,10 @@
                                 alert('密码错误！');
                                 lobby.roomIndex = -1;
                                 updateLobbyUI();
-                            } else {
-                                handleRemoteAction(msg);
                             }
                         } catch (e) { console.error('解析错误:', e); }
                     };
-                    conn.on('data', dataHandler);
+                    conn.on('data', authHandler);
                     setTimeout(() => {
                         if (!lobby.gameStarted) {
                             conn.close();
@@ -1867,7 +1866,7 @@
             document.getElementById('home-screen').classList.remove('hidden');
         });
 
-        console.log('🟢 Shinobi Synthesis 联机版 (完整选人同步)');
+        console.log('🟢 Shinobi Synthesis 联机版 (完整选人同步 + 永久监听)');
     </script>
 </body>
 </html>
