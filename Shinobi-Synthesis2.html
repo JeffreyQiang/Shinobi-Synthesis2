@@ -692,7 +692,7 @@
             '🌿': { name: '创造再生', element: '💫', atk: 0, heal: 12, level: 'advanced' },
             '⚡': { name: '麒麟', element: '⚡⚡', atk: 16, heal: 0, level: 'advanced' },
             '🌑': { name: '天照', element: '🔥👁️', atk: 12, heal: 0, level: 'advanced' }
-        };
+        ];
 
         // ============================================================
         // 3. 游戏状态
@@ -931,6 +931,11 @@
         // ============================================================
         function playCardFromDOM(playerId, cardElement) {
             if (gameState.gameOver) { log('⛔ 游戏已结束'); return; }
+            // 检查是否为当前回合玩家
+            if (playerId !== gameState.turn) {
+                log('⛔ 不是你的回合，不能出牌');
+                return;
+            }
             const member = getCurrentMember(playerId);
             if (!member) { log('⛔ 没有可用角色'); return; }
             if (member.freeze > 0) { log('❄️ 被冻结，无法行动'); return; }
@@ -958,6 +963,10 @@
 
         function playCardDataLocal(playerId, cardData, enhanced) {
             if (gameState.gameOver) { log('⛔ 游戏已结束'); return; }
+            if (playerId !== gameState.turn) {
+                log('⛔ 不是你的回合，不能出牌');
+                return;
+            }
             const member = getCurrentMember(playerId);
             if (!member) { log('⛔ 没有可用角色'); return; }
             if (member.freeze > 0) { log('❄️ 被冻结，无法行动'); return; }
@@ -1012,6 +1021,10 @@
         // ============================================================
         function discardCardFromDOM(playerId, cardElement) {
             if (gameState.gameOver) { log('⛔ 游戏已结束'); return; }
+            if (playerId !== gameState.turn) {
+                log('⛔ 不是你的回合，不能换牌');
+                return;
+            }
             const member = getCurrentMember(playerId);
             if (!member) { log('⛔ 没有可用角色'); return; }
             if (member.discarded) { log('⛔ 本回合已换过牌'); return; }
@@ -1032,6 +1045,10 @@
         }
 
         function synthesize() {
+            if (gameState.turn !== localPlayerId) {
+                log('⛔ 不是你的回合，不能合成');
+                return;
+            }
             if (gameState.gameOver) { log('⛔ 游戏已结束'); return; }
             const playerId = gameState.turn;
             const member = getCurrentMember(playerId);
@@ -1072,6 +1089,10 @@
         }
 
         function useSubstitute() {
+            if (gameState.turn !== localPlayerId) {
+                log('⛔ 不是你的回合，无法使用替身术');
+                return;
+            }
             if (gameState.gameOver) { log('⛔ 游戏已结束'); return; }
             const playerId = gameState.turn;
             const member = getCurrentMember(playerId);
@@ -1105,6 +1126,10 @@
         }
 
         function endTurn() {
+            if (gameState.turn !== localPlayerId) {
+                log('⛔ 不是你的回合，不能结束回合');
+                return;
+            }
             if (gameState.gameOver) { log('⛔ 游戏已结束'); return; }
             gameState.enhancePending = false;
             const currentMember = getCurrentMember(gameState.turn);
@@ -1250,13 +1275,35 @@
 
             if (btnDiscard) { if (gameState.discardMode) { btnDiscard.textContent = '❌ 取消换牌'; btnDiscard.classList.add('active'); } else { btnDiscard.textContent = '🔄 换牌'; btnDiscard.classList.remove('active'); } }
 
-            if (btnSubstitute) { const cur = getCurrentMember(gameState.turn); const frozen = cur && cur.freeze > 0; const chakra = cur && cur.chakra >= 1; btnSubstitute.disabled = !(frozen && chakra); btnSubstitute.textContent = `🪵 解除冻结 (1查克拉)${frozen?' ❄️':''}`; }
+            // 替身术按钮：只有当前回合且冻结且查克拉足够才可用
+            if (btnSubstitute) {
+                const cur = getCurrentMember(gameState.turn);
+                const frozen = cur && cur.freeze > 0;
+                const chakra = cur && cur.chakra >= 1;
+                const isMyTurn = (gameState.turn === localPlayerId);
+                btnSubstitute.disabled = !(frozen && chakra && isMyTurn);
+                btnSubstitute.textContent = `🪵 解除冻结 (1查克拉)${frozen?' ❄️':''}`;
+            }
+
+            // 结束回合按钮：只有当前回合玩家可用
+            if (btnEnd) {
+                btnEnd.disabled = (gameState.turn !== localPlayerId || gameState.gameOver);
+            }
+
+            // 合成按钮：只有当前回合玩家可用（点击事件已有检查，这里加视觉提示）
+            if (btnSynth) {
+                btnSynth.disabled = (gameState.turn !== localPlayerId || gameState.gameOver);
+            }
 
             let enhance = $('btn-enhance');
-            if (!enhance) { const bar = document.querySelector('.action-bar'); if (bar) { const b = document.createElement('button'); b.id = 'btn-enhance'; b.className = 'btn btn-warning'; b.textContent = '💪 忍术强化 (2查克拉)'; b.addEventListener('click', toggleEnhance); bar.appendChild(b); } } else { enhance.disabled = false; enhance.textContent = gameState.enhancePending ? '❌ 取消强化' : '💪 忍术强化 (2查克拉)'; if (gameState.enhancePending) enhance.classList.add('active'); else enhance.classList.remove('active'); }
+            if (!enhance) { const bar = document.querySelector('.action-bar'); if (bar) { const b = document.createElement('button'); b.id = 'btn-enhance'; b.className = 'btn btn-warning'; b.textContent = '💪 忍术强化 (2查克拉)'; b.addEventListener('click', toggleEnhance); bar.appendChild(b); } } else { enhance.disabled = (gameState.turn !== localPlayerId || gameState.gameOver); enhance.textContent = gameState.enhancePending ? '❌ 取消强化' : '💪 忍术强化 (2查克拉)'; if (gameState.enhancePending) enhance.classList.add('active'); else enhance.classList.remove('active'); }
         }
 
         function toggleEnhance() {
+            if (gameState.turn !== localPlayerId) {
+                log('⛔ 不是你的回合，不能使用强化');
+                return;
+            }
             if (gameState.gameOver) { log('⛔ 游戏已结束'); return; }
             const member = getCurrentMember(gameState.turn);
             if (!member) { log('⛔ 没有可用角色'); return; }
@@ -1267,7 +1314,7 @@
         }
 
         // ============================================================
-        // 11. 联机通信层（含永久监听器修复）
+        // 11. 联机通信层（含永久监听器）
         // ============================================================
         function sendAction(action) {
             if (lobby.conn && lobby.conn.open) {
@@ -1292,7 +1339,6 @@
                         selectedRoles.p2 = action.roles || [];
                         console.log('✅ 更新玩家二选择:', selectedRoles.p2);
                     }
-                    // 强制刷新选人界面
                     if (document.getElementById('role-select-screen').style.display !== 'none') {
                         renderRoleSelection();
                     }
@@ -1441,7 +1487,6 @@
                 document.getElementById('lobby-message').textContent = '你已经在房间中。';
                 return;
             }
-            // 简化：直接尝试创建房间0（实际可扩展）
             doCreateRoom(0);
         }
 
@@ -1463,7 +1508,6 @@
                     lobby.conn = conn;
                     conn.on('open', () => {
                         let verified = false;
-                        // 临时认证监听
                         const authHandler = (data) => {
                             try {
                                 const msg = JSON.parse(data);
@@ -1471,9 +1515,7 @@
                                 if (msg.type === 'auth' && msg.password === password) {
                                     verified = true;
                                     conn.send(JSON.stringify({ type: 'auth_ok' }));
-                                    // 移除认证监听
                                     conn.off('data', authHandler);
-                                    // 添加永久监听器处理后续所有消息
                                     conn.on('data', (data) => {
                                         try {
                                             const msg = JSON.parse(data);
@@ -1541,16 +1583,13 @@
                 localPlayerId = 2;
                 updateLobbyUI('正在连接...');
                 conn.on('open', () => {
-                    // 发送密码
                     conn.send(JSON.stringify({ type: 'auth', password: password }));
-                    // 监听认证响应
                     const authHandler = (data) => {
                         try {
                             const msg = JSON.parse(data);
                             console.log('📨 加入者收到认证响应:', msg);
                             if (msg.type === 'auth_ok') {
                                 conn.off('data', authHandler);
-                                // 添加永久监听器
                                 conn.on('data', (data) => {
                                     try {
                                         const msg = JSON.parse(data);
@@ -1829,6 +1868,10 @@
 
             btnSynth.addEventListener('click', synthesize);
             btnDiscard.addEventListener('click', function() {
+                if (gameState.turn !== localPlayerId) {
+                    log('⛔ 不是你的回合，不能换牌');
+                    return;
+                }
                 if (gameState.gameOver) { log('⛔ 游戏已结束'); return; }
                 const member = getCurrentMember(gameState.turn);
                 if (!member) { log('⛔ 没有可用角色'); return; }
@@ -1866,7 +1909,7 @@
             document.getElementById('home-screen').classList.remove('hidden');
         });
 
-        console.log('🟢 Shinobi Synthesis 联机版 (完整选人同步 + 永久监听)');
+        console.log('🟢 Shinobi Synthesis 联机版 (完整选人同步 + 回合权限控制)');
     </script>
 </body>
 </html>
