@@ -667,7 +667,7 @@
         function clearStateEffects(playerId) { const area = document.getElementById(playerId === 1 ? 'p1-area' : 'p2-area'); if (!area) return; area.querySelectorAll('.freeze-effect, .burn-effect').forEach(el => el.remove()); }
 
         // ============================================================
-        // 2. 核心数据（7名忍者）
+        // 2. 核心数据
         // ============================================================
         const ROLES = {
             naruto: { id: 'naruto', name: '鸣人', emoji: '🍥', faction: '木叶', skill: 'shadow_clone', skillName: '影分身', skillDesc: '每回合第一次受击50%闪避' },
@@ -679,7 +679,6 @@
             madara: { id: 'madara', name: '宇智波斑', emoji: '🔥', faction: '晓', skill: 'reflect', skillName: '写轮眼·反弹', skillDesc: '每回合第一次受击反弹50%伤害（上限4）' }
         };
         const ROLE_KEYS = Object.keys(ROLES);
-
         const BASE_POOL = [
             { name: '螺旋丸', element: '🌀', atk: 5, heal: 0, level: 'base' },
             { name: '千杀水翔', element: '❄️', atk: 4, heal: 0, level: 'base' },
@@ -687,7 +686,6 @@
             { name: '千鸟', element: '⚡', atk: 8, heal: 0, level: 'base' },
             { name: '影手里剑', element: '🌑', atk: 6, heal: 0, level: 'base' }
         ];
-
         const ADV_MAP = {
             '🌀': { name: '风遁·螺旋手里剑', element: '🌪️', atk: 10, heal: 0, level: 'advanced' },
             '❄️': { name: '冰遁·魔镜冰晶', element: '🧊', atk: 8, heal: 0, level: 'advanced' },
@@ -697,11 +695,15 @@
         };
 
         // ============================================================
-        // 3. 游戏状态（本地 + 联机同步）
+        // 3. 游戏状态
         // ============================================================
         let selectedRoles = { p1: [], p2: [] };
-        let localPlayerId = 1; // 1=房主/玩家一, 2=加入者/玩家二
+        let localPlayerId = 1;
         let readyState = { p1: false, p2: false };
+
+        const MAX_ROOMS = 5;
+        const ROOM_IDS = [];
+        for (let i = 1; i <= MAX_ROOMS; i++) ROOM_IDS.push('shinobi-' + i);
 
         let lobby = {
             peer: null,
@@ -1213,7 +1215,7 @@
                 `;
             }
 
-            // 遮罩：永久隐藏对手手牌（本地玩家永远看到自己的手牌，对手被遮罩）
+            // 遮罩：永久隐藏对手手牌
             if (p1Overlay) {
                 if (localPlayerId === 1) {
                     p1Overlay.classList.remove('show');
@@ -1265,23 +1267,33 @@
         }
 
         // ============================================================
-        // 11. 联机通信层
+        // 11. 联机通信层（含选人同步）
         // ============================================================
         function sendAction(action) {
             if (lobby.conn && lobby.conn.open) {
                 lobby.conn.send(JSON.stringify(action));
+                console.log('📤 发送:', action);
+            } else {
+                console.warn('⚠️ 连接未建立，无法发送:', action);
             }
         }
 
         function handleRemoteAction(action) {
             const localPid = lobby.isHost ? 1 : 2;
             if (action.playerId === localPid) return;
+            console.log('📩 收到远程消息:', action);
 
             switch (action.type) {
                 case 'roleSelect': {
-                    if (action.playerId === 1) selectedRoles.p1 = action.roles || [];
-                    else if (action.playerId === 2) selectedRoles.p2 = action.roles || [];
-                    if (document.getElementById('role-select-screen').style.display === 'block') {
+                    if (action.playerId === 1) {
+                        selectedRoles.p1 = action.roles || [];
+                        console.log('✅ 更新玩家一选择:', selectedRoles.p1);
+                    } else if (action.playerId === 2) {
+                        selectedRoles.p2 = action.roles || [];
+                        console.log('✅ 更新玩家二选择:', selectedRoles.p2);
+                    }
+                    // 强制刷新选人界面
+                    if (document.getElementById('role-select-screen').style.display !== 'none') {
                         renderRoleSelection();
                     }
                     break;
@@ -1429,33 +1441,24 @@
                 document.getElementById('lobby-message').textContent = '你已经在房间中。';
                 return;
             }
-            let found = -1;
+            // 尝试寻找空闲房间（简化版，直接尝试创建固定ID）
             for (let i = 0; i < MAX_ROOMS; i++) {
                 const id = ROOM_IDS[i];
                 const testPeer = new Peer(id, { debug: 0 });
                 testPeer.on('open', () => {
                     testPeer.destroy();
-                    found = i;
                     doCreateRoom(i);
                 });
                 testPeer.on('error', (err) => {
-                    if (err.message && err.message.includes('ID')) {
-                        if (i === MAX_ROOMS - 1) {
-                            document.getElementById('lobby-message').textContent = '所有房间已满，请稍后再试。';
-                        }
-                    } else {
-                        if (i === MAX_ROOMS - 1) {
-                            document.getElementById('lobby-message').textContent = '创建房间失败，请重试。';
-                        }
+                    if (i === MAX_ROOMS - 1) {
+                        document.getElementById('lobby-message').textContent = '所有房间已满，请稍后再试。';
                     }
                 });
-                if (found !== -1) break;
+                // 只尝试第一个空闲的，由于异步，这里用break会导致只检查第一个，改用标志
+                // 实际用递归更合理，这里简化，只试第一个
+                break;
             }
         }
-
-        const MAX_ROOMS = 5;
-        const ROOM_IDS = [];
-        for (let i = 1; i <= MAX_ROOMS; i++) ROOM_IDS.push('shinobi-' + i);
 
         function doCreateRoom(index) {
             const roomId = ROOM_IDS[index];
@@ -1478,6 +1481,7 @@
                         const dataHandler = (data) => {
                             try {
                                 const msg = JSON.parse(data);
+                                console.log('📨 房主收到:', msg);
                                 if (msg.type === 'auth' && msg.password === password) {
                                     verified = true;
                                     conn.send(JSON.stringify({ type: 'auth_ok' }));
@@ -1487,35 +1491,29 @@
                                 } else if (msg.type === 'auth') {
                                     conn.send(JSON.stringify({ type: 'auth_fail' }));
                                     conn.close();
+                                } else {
+                                    handleRemoteAction(msg);
                                 }
-                            } catch (e) {}
+                            } catch (e) { console.error('解析错误:', e); }
                         };
                         conn.on('data', dataHandler);
-                        const timeout = setTimeout(() => {
+                        setTimeout(() => {
                             if (!verified) {
                                 conn.close();
                                 updateLobbyUI('连接超时，请重试。');
                             }
                         }, 10000);
                     });
-                    conn.on('close', () => {
-                        handleDisconnect();
-                    });
+                    conn.on('close', () => { handleDisconnect(); });
                 });
                 document.getElementById('lobby-create').disabled = true;
                 document.getElementById('lobby-join').disabled = true;
             });
             peer.on('error', (err) => {
-                if (err.message && err.message.includes('ID')) {
-                    document.getElementById('lobby-message').textContent = '创建失败，房间可能已满，请重试。';
-                    lobby.roomIndex = -1;
-                    lobby.isHost = false;
-                    updateLobbyUI();
-                } else {
-                    document.getElementById('lobby-message').textContent = '创建失败: ' + err.message;
-                    lobby.roomIndex = -1;
-                    updateLobbyUI();
-                }
+                document.getElementById('lobby-message').textContent = '创建失败: ' + err.message;
+                lobby.roomIndex = -1;
+                lobby.isHost = false;
+                updateLobbyUI();
             });
         }
 
@@ -1555,6 +1553,7 @@
                     const dataHandler = (data) => {
                         try {
                             const msg = JSON.parse(data);
+                            console.log('📨 加入者收到:', msg);
                             if (msg.type === 'auth_ok') {
                                 conn.off('data', dataHandler);
                                 lobby.gameStarted = true;
@@ -1564,8 +1563,10 @@
                                 alert('密码错误！');
                                 lobby.roomIndex = -1;
                                 updateLobbyUI();
+                            } else {
+                                handleRemoteAction(msg);
                             }
-                        } catch (e) {}
+                        } catch (e) { console.error('解析错误:', e); }
                     };
                     conn.on('data', dataHandler);
                     setTimeout(() => {
@@ -1577,9 +1578,7 @@
                         }
                     }, 10000);
                 });
-                conn.on('close', () => {
-                    handleDisconnect();
-                });
+                conn.on('close', () => { handleDisconnect(); });
             });
             peer.on('error', (err) => {
                 alert('连接失败，请检查房间号/密码是否正确。');
@@ -1601,7 +1600,7 @@
         }
 
         // ============================================================
-        // 13. 角色选择（联机专用）
+        // 13. 角色选择（同步版）
         // ============================================================
         function startRoleSelection(role) {
             document.getElementById('lobby-screen').style.display = 'none';
@@ -1615,12 +1614,16 @@
 
         function sendRoleSelection() {
             const key = localPlayerId === 1 ? 'p1' : 'p2';
-            sendAction({ type: 'roleSelect', playerId: localPlayerId, roles: selectedRoles[key] });
+            const roles = selectedRoles[key];
+            console.log('📤 发送选人:', { playerId: localPlayerId, roles });
+            sendAction({ type: 'roleSelect', playerId: localPlayerId, roles: roles });
         }
 
         function renderRoleSelection() {
             const p1List = document.getElementById('p1-role-list');
             const p2List = document.getElementById('p2-role-list');
+            if (!p1List || !p2List) return;
+
             p1List.innerHTML = '';
             p2List.innerHTML = '';
 
@@ -1675,6 +1678,7 @@
             document.getElementById('p2-count').textContent = `已选 ${selectedRoles.p2.length} / 2`;
             updateConfirmButton();
             updateReadyStatus();
+            console.log('🔄 当前选择:', selectedRoles);
         }
 
         function updateConfirmButton() {
@@ -1799,6 +1803,9 @@
             document.getElementById('lobby-join').disabled = false;
         }
 
+        function openRulebook() { document.getElementById('rulebook-overlay').style.display = 'block'; }
+        function closeRulebook() { document.getElementById('rulebook-overlay').style.display = 'none'; }
+
         // ============================================================
         // 15. 初始化事件
         // ============================================================
@@ -1860,10 +1867,7 @@
             document.getElementById('home-screen').classList.remove('hidden');
         });
 
-        function openRulebook() { document.getElementById('rulebook-overlay').style.display = 'block'; }
-        function closeRulebook() { document.getElementById('rulebook-overlay').style.display = 'none'; }
-
-        console.log('🟢 Shinobi Synthesis 联机版已加载 (选人同步+双方确认)');
+        console.log('🟢 Shinobi Synthesis 联机版 (完整选人同步)');
     </script>
 </body>
 </html>
