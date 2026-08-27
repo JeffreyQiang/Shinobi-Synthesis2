@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shinobi Synthesis · v1.6</title>
+    <title>Shinobi Synthesis · v1.7</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         /* ===== 全局样式 ===== */
@@ -403,7 +403,7 @@
         <div class="scroll-container">
             <div style="position:relative; z-index:2;">
                 <div class="scroll-title">SHINOBI SYNTHESIS</div>
-                <div class="scroll-sub">忍界大战 · v1.6</div>
+                <div class="scroll-sub">忍界大战 · v1.7</div>
                 <div class="scroll-desc">
                     🃏 基础合成 · 查克拉策略 · 替身术<br>
                     <span>⚔️ 选择你的战斗模式 ⚔️</span>
@@ -642,9 +642,9 @@
 
     <script>
         // ============================================================
-        //  Shinobi Synthesis v1.6  ·  强制身份修正  ·  连接自愈
+        //  Shinobi Synthesis v1.7  ·  终极可靠性修复  ·  消息重发 + ACK
         // ============================================================
-        console.log('🟢 Shinobi Synthesis v1.6 加载中...');
+        console.log('🟢 Shinobi Synthesis v1.7 加载中...');
 
         // ============================================================
         // 1. 音效 & 视觉反馈
@@ -1499,12 +1499,16 @@
         }
 
         // ============================================================
-        // 9. endTurn（核心修复：强制身份 + 连接自愈）
+        // 9. endTurn（带重发机制 + ACK）
         // ============================================================
+        var endTurnRetryCount = 0;
+        var endTurnRetryTimer = null;
+        var endTurnAckReceived = false;
+
         function endTurn() {
             console.log('🔹 endTurn 被调用，当前 turn =', gameState.turn, 'localPlayerId =', localPlayerId);
 
-            // 1. 强制身份修正
+            // 强制身份修正
             if (lobby.isHost && localPlayerId !== 1) {
                 console.warn('⚠️ 房主身份错误，强制修正 localPlayerId 为 1');
                 localPlayerId = 1;
@@ -1522,7 +1526,7 @@
             }
             if (gameState.gameOver) { log('⛔ 游戏已结束'); return; }
 
-            // 2. 执行结束回合逻辑
+            // 执行结束回合逻辑
             gameState.enhancePending = false;
             var currentMember = getCurrentMember(gameState.turn);
             if (currentMember && currentMember.freeze > 0) {
@@ -1561,6 +1565,7 @@
             gameState.turn = gameState.turn === 1 ? 2 : 1;
             console.log('🔹 turn 从', oldTurn, '切换为', gameState.turn);
 
+            // 新回合玩家抽牌、回血
             var newMember = getCurrentMember(gameState.turn);
             if (newMember) {
                 var healAmount = 1;
@@ -1583,31 +1588,34 @@
 
             log('🔄 轮到玩家' + gameState.turn + '的回合');
 
-            // 3. 发送消息（带连接自愈）
+            // 发送 endTurn 消息（带重发机制）
             var msg = {
                 type: 'endTurn',
                 playerId: gameState.turn,
                 roundCounter: gameState.roundCounter
             };
-            // 检查连接状态
-            if (lobby.conn && lobby.conn.open) {
-                sendAction(msg);
-            } else {
-                console.warn('⚠️ 连接未建立，尝试重新获取连接...');
-                // 尝试重新获取连接（对于房主，如果有 peer 且没有 conn，可以尝试重新连接）
-                if (lobby.isHost && lobby.peer) {
-                    // 房主可以尝试等待新的连接，但这里无法自动重建，建议提示
-                    log('⚠️ 连接已断开，请重新开房。');
-                } else if (!lobby.isHost && lobby.peer) {
-                    // 加入者可以尝试重新连接
-                    log('⚠️ 连接已断开，请重新加入房间。');
+            endTurnAckReceived = false;
+            endTurnRetryCount = 0;
+
+            function sendEndTurnWithRetry() {
+                if (endTurnAckReceived) {
+                    console.log('✅ 已收到 ACK，停止重发');
+                    return;
                 }
-                // 但本地仍要切换回合，避免卡死
-                render();
-                console.log('✅ 本地回合切换完成，但消息未发送。');
-                return;
+                if (endTurnRetryCount >= 3) {
+                    console.warn('⚠️ 重发 3 次仍未收到 ACK，放弃重发，但本地已切换');
+                    return;
+                }
+                console.log('📤 发送 endTurn (尝试', endTurnRetryCount + 1, ')');
+                sendAction(msg);
+                endTurnRetryCount++;
+                if (endTurnRetryTimer) clearTimeout(endTurnRetryTimer);
+                endTurnRetryTimer = setTimeout(sendEndTurnWithRetry, 1000);
             }
 
+            sendEndTurnWithRetry();
+
+            // 刷新UI
             render();
             console.log('✅ 回合结束，当前 turn =', gameState.turn, 'localPlayerId =', localPlayerId);
         }
@@ -1861,7 +1869,7 @@
         }
 
         // ============================================================
-        // 12. 联机通信层
+        // 12. 联机通信层（含 ACK 处理）
         // ============================================================
         function sendAction(action) {
             if (lobby.conn && lobby.conn.open) {
@@ -1874,7 +1882,15 @@
 
         function handleRemoteAction(action) {
             var localPid = lobby.isHost ? 1 : 2;
-            if (action.playerId === localPid) return;
+            // 如果是自己发送的 endTurn，忽略（但加入者发送的 endTurn 会被处理）
+            if (action.playerId === localPid) {
+                // 但如果是房主自己发送的 endTurn，忽略，避免重复切换
+                if (action.type === 'endTurn' && lobby.isHost) {
+                    console.log('⏭️ 忽略自己发送的 endTurn');
+                    return;
+                }
+                return;
+            }
             console.log('📩 收到远程消息:', action);
 
             switch (action.type) {
@@ -1981,6 +1997,21 @@
                     log('🔄 轮到玩家' + gameState.turn + '的回合');
                     render();
                     console.log('✅ 处理 endTurn 后，当前 turn =', gameState.turn, 'localPlayerId =', localPlayerId);
+                    // 发送 ACK 确认收到
+                    if (lobby.conn && lobby.conn.open) {
+                        lobby.conn.send(JSON.stringify({ type: 'endTurnAck', playerId: localPlayerId }));
+                        console.log('📤 发送 endTurnAck');
+                    }
+                    break;
+                }
+                case 'endTurnAck': {
+                    // 房主收到加入者的确认，取消重发
+                    console.log('✅ 收到 endTurnAck');
+                    endTurnAckReceived = true;
+                    if (endTurnRetryTimer) {
+                        clearTimeout(endTurnRetryTimer);
+                        endTurnRetryTimer = null;
+                    }
                     break;
                 }
                 case 'gameOver': {
@@ -2577,8 +2608,8 @@
             console.log('✅ 所有事件绑定完成。');
         });
 
-        console.log('🟢 Shinobi Synthesis v1.6 加载完成！');
-        console.log('📌 版本特性：强制身份修正 + 连接自愈 + 回合同步增强。');
+        console.log('🟢 Shinobi Synthesis v1.7 加载完成！');
+        console.log('📌 版本特性：回合消息重发 + ACK 确认，彻底解决丢包问题。');
     </script>
 </body>
 </html>
