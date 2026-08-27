@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shinobi Synthesis · v1.3</title>
+    <title>Shinobi Synthesis · v1.4</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        /* ===== 完整样式（与之前相同，为确保完整此处全部包含） ===== */
+        /* ===== 完整样式（与 v1.3 一致，无省略） ===== */
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
         body {
             background: #0a0806;
@@ -248,7 +248,7 @@
         <div class="scroll-container">
             <div style="position:relative; z-index:2;">
                 <div class="scroll-title">SHINOBI SYNTHESIS</div>
-                <div class="scroll-sub">忍界大战 · v1.3</div>
+                <div class="scroll-sub">忍界大战 · v1.4</div>
                 <div class="scroll-desc">
                     🃏 基础合成 · 查克拉策略 · 替身术<br>
                     <span>⚔️ 选择你的战斗模式 ⚔️</span>
@@ -487,9 +487,9 @@
 
     <script>
         // ============================================================
-        //  Shinobi Synthesis v1.3  ·  修复元素获取错误
+        //  Shinobi Synthesis v1.4  ·  回合同步增强  ·  详细日志
         // ============================================================
-        console.log('🟢 Shinobi Synthesis v1.3 加载中...');
+        console.log('🟢 Shinobi Synthesis v1.4 加载中...');
 
         // ============================================================
         // 1. 音效 & 视觉反馈（与之前相同，此处完整）
@@ -1194,7 +1194,7 @@
         }
 
         // ============================================================
-        // 8. 其他游戏函数（含回合权限）
+        // 8. 其他游戏函数（含回合权限和详细日志）
         // ============================================================
         function discardCardFromDOM(playerId, cardElement) {
             if (gameState.gameOver) { log('⛔ 游戏已结束'); return; }
@@ -1338,7 +1338,11 @@
             });
         }
 
+        // ============================================================
+        // 核心修复：endTurn 增加详细日志，确保回合正确切换
+        // ============================================================
         function endTurn() {
+            console.log('🔹 endTurn 被调用，当前 turn =', gameState.turn, 'localPlayerId =', localPlayerId);
             if (gameState.turn !== localPlayerId) {
                 log('⛔ 不是你的回合，不能结束回合');
                 return;
@@ -1377,7 +1381,10 @@
                 gameState.roundCounter++;
                 log('📊 ===== 第 ' + gameState.roundCounter + ' 回合开始 =====');
             }
+            // 切换回合
+            var oldTurn = gameState.turn;
             gameState.turn = gameState.turn === 1 ? 2 : 1;
+            console.log('🔹 turn 从', oldTurn, '切换为', gameState.turn);
 
             var newMember = getCurrentMember(gameState.turn);
             if (newMember) {
@@ -1399,11 +1406,16 @@
                 }
             }
             log('🔄 轮到玩家' + gameState.turn + '的回合');
+            // 发送消息给对手
             sendAction({ type: 'endTurn', playerId: gameState.turn, roundCounter: gameState.roundCounter });
+            // 强制刷新UI
             render();
             console.log('✅ 回合结束，当前 turn =', gameState.turn, 'localPlayerId =', localPlayerId);
         }
 
+        // ============================================================
+        // 胜利
+        // ============================================================
         function showVictory(winner) {
             var overlay = document.getElementById('victory-overlay');
             var winnerName = document.getElementById('victory-winner-name');
@@ -1433,9 +1445,10 @@
         }
 
         // ============================================================
-        // 9. 渲染（含按钮禁用）
+        // 9. 渲染（含按钮禁用及状态日志）
         // ============================================================
         function render() {
+            console.log('🔸 render 开始，turn =', gameState.turn, 'localPlayerId =', localPlayerId);
             [1, 2].forEach(function(pid) {
                 var team = getTeam(pid);
                 var alive = getAliveCount(team);
@@ -1584,6 +1597,7 @@
             var btnEnd = document.getElementById('btn-end-turn');
             if (btnEnd) {
                 btnEnd.disabled = (gameState.turn !== localPlayerId || gameState.gameOver);
+                console.log('🔸 btnEnd.disabled =', btnEnd.disabled, ' (turn=', gameState.turn, 'local=', localPlayerId, ')');
             }
 
             var btnSynth = document.getElementById('btn-synthesize');
@@ -1637,7 +1651,7 @@
         }
 
         // ============================================================
-        // 10. 联机通信层
+        // 10. 联机通信层（含 endTurn 详细日志）
         // ============================================================
         function sendAction(action) {
             if (lobby.conn && lobby.conn.open) {
@@ -1748,11 +1762,14 @@
                     break;
                 }
                 case 'endTurn': {
-                    gameState.turn = action.playerId === 1 ? 2 : 1;
+                    // 收到对手的结束回合消息，强制更新回合
+                    var newTurn = action.playerId === 1 ? 2 : 1;
+                    console.log('🔸 收到 endTurn，action.playerId=', action.playerId, '，将 turn 从', gameState.turn, '设为', newTurn);
+                    gameState.turn = newTurn;
                     gameState.roundCounter = action.roundCounter || gameState.roundCounter;
                     log('🔄 轮到玩家' + gameState.turn + '的回合');
                     render();
-                    console.log('✅ 收到 endTurn，当前 turn =', gameState.turn, 'localPlayerId =', localPlayerId);
+                    console.log('✅ 处理 endTurn 后，当前 turn =', gameState.turn, 'localPlayerId =', localPlayerId);
                     break;
                 }
                 case 'gameOver': {
@@ -1768,7 +1785,7 @@
         }
 
         // ============================================================
-        // 11. 大厅管理
+        // 11. 大厅管理（同 v1.3，无变化）
         // ============================================================
         function updateLobbyUI(message) {
             var label = document.getElementById('lobby-status-label');
@@ -2218,7 +2235,7 @@
         function closeRulebook() { document.getElementById('rulebook-overlay').style.display = 'none'; }
 
         // ============================================================
-        // 14. 初始化事件（所有元素获取都在 DOMContentLoaded 内部）
+        // 14. 初始化事件
         // ============================================================
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🟢 DOM 已就绪，开始绑定事件...');
@@ -2341,8 +2358,8 @@
             console.log('✅ 所有事件绑定完成。');
         });
 
-        console.log('🟢 Shinobi Synthesis v1.3 加载完成！');
-        console.log('📌 版本特性：修复元素获取错误，增强稳定性。');
+        console.log('🟢 Shinobi Synthesis v1.4 加载完成！');
+        console.log('📌 版本特性：回合同步增强，详细日志辅助调试。');
     </script>
 </body>
 </html>
