@@ -748,7 +748,7 @@
         let localPlayerId = 1;
         let readyState = { p1: false, p2: false };
         let isOnline = false;
-        let isProcessingTurnEnd = false; // 防止重入
+        let isProcessingTurnEnd = false;
 
         const MAX_ROOMS = 5;
         const ROOM_IDS = [];
@@ -835,6 +835,7 @@
         function getCurrentMember(playerId) {
             const team = getTeam(playerId);
             if (team.members.length === 0) return null;
+            if (team.currentIndex < 0 || team.currentIndex >= team.members.length) return null;
             return team.members[team.currentIndex] || null;
         }
 
@@ -860,6 +861,28 @@
                 team.currentIndex = aliveIndices[0];
             } else {
                 team.currentIndex = -1;
+            }
+        }
+
+        // ---- 新增：处理死亡切换和游戏结束检测 ----
+        function handleDeathAfterDamage(playerId) {
+            const team = getTeam(playerId);
+            const current = getCurrentMember(playerId);
+            // 如果当前成员不存在或已死亡，则切换到下一个
+            if (!current || current.hp <= 0) {
+                switchToNextAlive(playerId);
+            }
+            // 检查队伍是否全灭
+            if (getAliveCount(team) === 0) {
+                state.gameOver = true;
+                const winner = playerId === 1 ? 2 : 1;
+                log(`💀 玩家${playerId}小队全灭！玩家${winner}胜利！`);
+                showVictory(winner);
+                render();
+                // 房主广播游戏结束
+                if (lobby.isHost) {
+                    sendAction({ type: 'gameOver', winner: winner });
+                }
             }
         }
 
@@ -1242,6 +1265,10 @@
 
             if (result.dmg > 0) showDamageOnTarget(result.targetId, result.dmg, false);
             else if (result.heal > 0) showDamageOnTarget(result.ownerId, result.heal, true);
+
+            // ---- 死亡处理 ----
+            handleDeathAfterDamage(result.ownerId);
+            handleDeathAfterDamage(result.targetId);
         }
 
         // ---- 出牌函数 ----
@@ -1276,6 +1303,10 @@
                 if (result.drawnCard && playerId === localPlayerId) {
                     addCardToDOM(playerId, result.drawnCard);
                 }
+                // 处理死亡
+                handleDeathAfterDamage(result.ownerId);
+                handleDeathAfterDamage(result.targetId);
+                // 广播结果
                 sendAction({ type: 'playCardResult', result: result, cardData: card, playerId: playerId });
                 const role = getCurrentRoleObj(playerId);
                 const roleName = role ? role.emoji + role.name : '玩家' + playerId;
@@ -1307,6 +1338,8 @@
                 if (result.drawnCard && playerId === localPlayerId) {
                     addCardToDOM(playerId, result.drawnCard);
                 }
+                handleDeathAfterDamage(result.ownerId);
+                handleDeathAfterDamage(result.targetId);
                 sendAction({ type: 'playCardResult', result: result, cardData: cardData, playerId: playerId });
                 const role = getCurrentRoleObj(playerId);
                 const roleName = role ? role.emoji + role.name : '玩家' + playerId;
@@ -1521,17 +1554,23 @@
                 const newMember = getCurrentMember(state.turn);
                 let turnData = null;
                 if (newMember) {
-                    // 回血
-                    let healAmount = 1;
-                    if (hasSkill(state.turn, 'medical')) {
-                        healAmount = 2;
-                        log(`🌸 小樱 医疗天赋：回血+1`);
-                    }
-                    const oldHp = newMember.hp;
-                    newMember.hp = Math.min(newMember.maxHp, newMember.hp + healAmount);
-                    const actualHeal = newMember.hp - oldHp;
-                    if (actualHeal > 0) {
-                        log(`💚 玩家${state.turn} 恢复${healAmount}HP (当前 ${newMember.hp})`);
+                    // 只有存活角色才回血
+                    if (newMember.hp > 0) {
+                        let healAmount = 1;
+                        if (hasSkill(state.turn, 'medical')) {
+                            healAmount = 2;
+                            log(`🌸 小樱 医疗天赋：回血+1`);
+                        }
+                        const oldHp = newMember.hp;
+                        newMember.hp = Math.min(newMember.maxHp, newMember.hp + healAmount);
+                        const actualHeal = newMember.hp - oldHp;
+                        if (actualHeal > 0) {
+                            log(`💚 玩家${state.turn} 恢复${healAmount}HP (当前 ${newMember.hp})`);
+                        }
+                    } else {
+                        log(`⚠️ 玩家${state.turn} 当前角色已死亡，跳过回血`);
+                        // 若当前角色死亡，切换到下一个
+                        handleDeathAfterDamage(state.turn);
                     }
 
                     // 抽牌（玩家2第一回合不抽）
@@ -1586,19 +1625,15 @@
                 return;
             }
             if (lobby.isHost) {
-                // 房主直接执行
                 executeTurnEndAndBroadcast();
             } else {
-                // 加入者发送请求
                 sendAction({
                     type: 'endTurn',
                     playerId: state.turn,
                     roundCounter: state.roundCounter,
                     senderId: localPlayerId
-                    // turnData 为 null
                 });
                 log('📤 已发送结束回合请求，等待房主处理...');
-                // 本地可做 UI 锁定（可选）
             }
         }
 
@@ -1661,6 +1696,8 @@
                         if (result.drawnCard && pid === localPlayerId) {
                             addCardToDOM(pid, result.drawnCard);
                         }
+                        handleDeathAfterDamage(result.ownerId);
+                        handleDeathAfterDamage(result.targetId);
                         sendAction({ type: 'playCardResult', result: result, cardData: cardData, playerId: pid });
                         const role = getCurrentRoleObj(pid);
                         const roleName = role ? role.emoji + role.name : '玩家' + pid;
@@ -1672,7 +1709,7 @@
                 case 'playCardResult': {
                     if (!lobby.isHost) {
                         const result = action.result;
-                        applyCardResult(result);
+                        applyCardResult(result); // 内部已调用 handleDeathAfterDamage
                         const role = getCurrentRoleObj(action.playerId);
                         const roleName = role ? role.emoji + role.name : '玩家' + action.playerId;
                         log(`🧙 ${roleName} 打出 <span class="highlight">${action.cardData.element} ${action.cardData.name}</span> → ${result.log}`);
@@ -1733,7 +1770,6 @@
                 }
                 case 'endTurn': {
                     if (action.turnData) {
-                        // 房主广播的完整数据，加入者应用
                         const targetPid = action.turnData.turn;
                         const member = getCurrentMember(targetPid);
                         if (member) {
@@ -1741,7 +1777,6 @@
                             member.chakra = action.turnData.chakra;
                             member.burn = action.turnData.burn;
                             member.freeze = action.turnData.freeze;
-                            // 更新手牌并刷新DOM
                             member.hand = action.turnData.hand;
                             clearHandDOM(targetPid);
                             member.hand.forEach(card => {
@@ -1753,21 +1788,14 @@
                         log(`🔄 轮到玩家${state.turn}的回合`);
                         render();
                     } else {
-                        // 加入者发送的请求，房主处理
                         if (lobby.isHost) {
-                            // 但此时可能已由房主自己的 endTurn 触发，需要防止重入
-                            // 如果当前不是处理中，则执行
                             if (!isProcessingTurnEnd) {
-                                // 验证该请求是否有效：请求中的 playerId 必须与当前 turn 一致
                                 if (action.playerId === state.turn) {
                                     executeTurnEndAndBroadcast();
                                 } else {
                                     log('⚠️ 忽略过期的回合结束请求');
                                 }
                             }
-                        } else {
-                            // 加入者不会收到自己的消息（因为 senderId 过滤），但以防万一
-                            console.warn('加入者收到无数据的 endTurn，忽略');
                         }
                     }
                     break;
@@ -2483,7 +2511,7 @@
         });
 
         console.log('🟢 Shinobi Synthesis 同步版 加载完成');
-        console.log('📌 房主统一处理回合切换，确保回血和抽牌完全同步');
+        console.log('📌 房主统一处理回合切换，出牌伤害后立即切换死亡角色，回血前检查存活状态');
     </script>
 </body>
 </html>
