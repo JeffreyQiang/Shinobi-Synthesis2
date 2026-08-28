@@ -1148,12 +1148,29 @@
                         target.hp = Math.max(0, target.hp - dmg3);
                         if (ownerPlayerId === 1) state.totalDamage.p1 += dmg3;
                         else state.totalDamage.p2 += dmg3;
-                        showDamageOnTarget(targetId, dmg3, false);
+                        showDamageOnTarget(targetPlayerId, dmg3, false);
                         effect = '🐸 文太：造成3点伤害！';
                     } else {
                         effect = '🐸 蛤蟆召唤失败...';
                     }
                     extra += ' ' + effect;
+                }
+            }
+
+            // ---- 鼬 万花筒 技能：每回合第一张牌打出后额外抽1张 ----
+            let drawnCard = null;
+            if (hasSkill(ownerPlayerId, 'mangekyo')) {
+                const key = ownerPlayerId === 1 ? 'p1' : 'p2';
+                if (!state.skillTriggered[key].mangekyo) {
+                    state.skillTriggered[key].mangekyo = true;
+                    if (owner.hand.length < 4) {
+                        drawnCard = drawOne(ownerPlayerId);
+                        if (drawnCard) {
+                            extra += ' 👁️万花筒：抽1张牌';
+                            // 如果 owner 是本地玩家，稍后在调用者中负责添加 DOM（但房主端会在 playCardFromDOM 中处理）
+                            // 但为了保险，我们在这里不添加 DOM，由调用者统一处理
+                        }
+                    }
                 }
             }
 
@@ -1194,6 +1211,7 @@
                 reflectTriggered: reflectTriggered,
                 reflectedDmg: reflectedDmg,
                 summonResult: summonResult,
+                drawnCard: drawnCard,  // 鼬技能抽到的牌
                 ownerDead: owner.hp <= 0,
                 targetDead: target.hp <= 0,
                 ownerId: ownerPlayerId,
@@ -1229,6 +1247,17 @@
             if (result.heal > 0) {
                 if (result.ownerId === 1) state.totalHeal.p1 += result.heal;
                 else state.totalHeal.p2 += result.heal;
+            }
+
+            // ---- 处理鼬技能抽牌 ----
+            if (result.drawnCard) {
+                // 将抽到的牌加入 owner 手牌（drawOne 已经在房主端 push 了，但加入者需要同步数据）
+                // 注意：owner.hand 可能已经被修改，我们直接 push
+                owner.hand.push(result.drawnCard);
+                // 如果 owner 是本地玩家，添加到 DOM
+                if (result.ownerId === localPlayerId) {
+                    addCardToDOM(result.ownerId, result.drawnCard);
+                }
             }
 
             // 显示浮动数字
@@ -1268,6 +1297,11 @@
             if (lobby.isHost) {
                 // 房主执行
                 const result = applyCard(card, playerId, targetId);
+                // 如果鼬抽了牌且 owner 是本地玩家，需要添加 DOM（但 applyCard 中已经 push 到 hand，未添加 DOM）
+                // 由于房主就是执行者，如果 playerId === localPlayerId，则添加 DOM
+                if (result.drawnCard && playerId === localPlayerId) {
+                    addCardToDOM(playerId, result.drawnCard);
+                }
                 // 发送结果给加入者
                 sendAction({ type: 'playCardResult', result: result, cardData: card, playerId: playerId });
                 // 本地日志
@@ -1301,6 +1335,9 @@
 
             if (lobby.isHost) {
                 const result = applyCard(cardData, playerId, targetId);
+                if (result.drawnCard && playerId === localPlayerId) {
+                    addCardToDOM(playerId, result.drawnCard);
+                }
                 sendAction({ type: 'playCardResult', result: result, cardData: cardData, playerId: playerId });
                 const role = getCurrentRoleObj(playerId);
                 const roleName = role ? role.emoji + role.name : '玩家' + playerId;
@@ -1403,6 +1440,7 @@
         }
 
         function applyBurns() {
+            // 该函数现在只在房主的 endTurn 中调用，加入者不会主动调用
             [1, 2].forEach(pid => {
                 const member = getCurrentMember(pid);
                 if (member && member.burn > 0) {
@@ -1416,7 +1454,6 @@
                     if (member.hp <= 0) {
                         member.hp = 0;
                         const team = getTeam(pid);
-                        const dead = team.members.filter(m => m.hp <= 0).length;
                         const roleName = ROLES[member.roleId]?.emoji + ROLES[member.roleId]?.name || '角色';
                         log(`💀 ${roleName} 阵亡！`);
                         switchToNextAlive(pid);
@@ -1653,6 +1690,15 @@
                         const cardData = action.cardData;
                         const targetId = pid === 1 ? 2 : 1;
                         const result = applyCard(cardData, pid, targetId);
+                        // 如果抽到牌且是本地玩家（房主是1，但加入者是2，所以这里不会是本地，但房主需要添加DOM吗？）
+                        // 房主执行时，如果 pid 是加入者（2），且抽到牌，但加入者不是房主本地，所以不需要在房主端添加DOM，
+                        // 但需要将 drawnCard 包含在结果中发给加入者，在 applyCardResult 中处理
+                        // 但房主本地不需要显示加入者的手牌，所以不用 addCardToDOM
+                        if (result.drawnCard && pid === localPlayerId) {
+                            // 只有抽牌者是本地玩家才添加DOM（实际上这里不会触发，因为pid是加入者，不是房主）
+                            // 但保留判断
+                            addCardToDOM(pid, result.drawnCard);
+                        }
                         sendAction({ type: 'playCardResult', result: result, cardData: cardData, playerId: pid });
                         const role = getCurrentRoleObj(pid);
                         const roleName = role ? role.emoji + role.name : '玩家' + pid;
@@ -1664,7 +1710,7 @@
                 case 'playCardResult': {
                     if (!lobby.isHost) {
                         const result = action.result;
-                        applyCardResult(result);
+                        applyCardResult(result); // 内部会处理 drawnCard
                         const role = getCurrentRoleObj(action.playerId);
                         const roleName = role ? role.emoji + role.name : '玩家' + action.playerId;
                         log(`🧙 ${roleName} 打出 <span class="highlight">${action.cardData.element} ${action.cardData.name}</span> → ${result.log}`);
@@ -1727,7 +1773,7 @@
                     // 如果消息包含 turnData，说明是房主广播的完整数据
                     if (action.turnData) {
                         // 应用数据到当前玩家（即新回合玩家）
-                        const targetPid = action.turnData.turn; // 或 action.playerId
+                        const targetPid = action.turnData.turn;
                         const member = getCurrentMember(targetPid);
                         if (member) {
                             member.hp = action.turnData.hp;
@@ -1736,10 +1782,12 @@
                             member.freeze = action.turnData.freeze;
                             // 更新手牌（直接替换）
                             member.hand = action.turnData.hand;
-                            // 如果抽到牌，且该玩家是本地玩家，则添加到DOM
-                            if (action.turnData.drawnCard && targetPid === localPlayerId) {
-                                addCardToDOM(targetPid, action.turnData.drawnCard);
-                            }
+                            // 重绘手牌 DOM（确保完全同步）
+                            clearHandDOM(targetPid);
+                            member.hand.forEach(card => {
+                                addCardToDOM(targetPid, card);
+                            });
+                            // 如果抽到牌且该玩家是本地玩家，addCardToDOM 已经添加过了，但上面的循环会添加所有牌，所以不会漏
                         }
                         // 更新回合和轮次
                         state.turn = action.turnData.turn;
