@@ -581,7 +581,8 @@
     <script>
         // ============================================================
         //  Shinobi Synthesis · 同步版
-        //  房主统一处理回合切换，确保回血和抽牌完全同步
+        //  房主统一处理回合切换，出牌伤害后立即切换死亡角色，回血前检查存活状态
+        //  强化逻辑统一由房主处理，客户端仅发送 enhanced 标志
         // ============================================================
         console.log('🟢 Shinobi Synthesis 同步版 加载中...');
 
@@ -864,22 +865,19 @@
             }
         }
 
-        // ---- 新增：处理死亡切换和游戏结束检测 ----
+        // ---- 死亡处理 ----
         function handleDeathAfterDamage(playerId) {
             const team = getTeam(playerId);
             const current = getCurrentMember(playerId);
-            // 如果当前成员不存在或已死亡，则切换到下一个
             if (!current || current.hp <= 0) {
                 switchToNextAlive(playerId);
             }
-            // 检查队伍是否全灭
             if (getAliveCount(team) === 0) {
                 state.gameOver = true;
                 const winner = playerId === 1 ? 2 : 1;
                 log(`💀 玩家${playerId}小队全灭！玩家${winner}胜利！`);
                 showVictory(winner);
                 render();
-                // 房主广播游戏结束
                 if (lobby.isHost) {
                     sendAction({ type: 'gameOver', winner: winner });
                 }
@@ -945,27 +943,21 @@
                 if (state.discardMode) { log('💡 点击 ✕ 换牌'); return; }
                 if (playerId !== state.turn) { log('⛔ 这不是你的回合！'); return; }
                 if (state.enhancePending) {
-                    const member = getCurrentMember(playerId);
-                    if (member.chakra >= 2) {
-                        member.chakra -= 2;
-                        state.enhancePending = false;
-                        const cardData = {
-                            name: card.name,
-                            element: card.element,
-                            atk: parseInt(div.dataset.atk) + 5,
-                            heal: parseInt(div.dataset.heal) + 5,
-                            level: card.level
-                        };
-                        div.remove();
-                        syncHandFromDOM(playerId);
-                        playCardData(playerId, cardData, true);
-                        return;
-                    } else {
-                        log('⛔ 查克拉不足，无法强化 (需要2点)');
-                        state.enhancePending = false;
-                        render();
-                        return;
-                    }
+                    // ---- 强化：客户端不消耗查克拉，只发送 enhanced 标志 ----
+                    // 移除客户端消耗代码，改为发送 enhanced: true
+                    state.enhancePending = false; // 清除强化状态
+                    const cardData = {
+                        name: card.name,
+                        element: card.element,
+                        atk: parseInt(div.dataset.atk),
+                        heal: parseInt(div.dataset.heal),
+                        level: card.level
+                    };
+                    div.remove();
+                    syncHandFromDOM(playerId);
+                    // 调用 playCardData 并传入 enhanced = true
+                    playCardData(playerId, cardData, true);
+                    return;
                 } else {
                     playCardFromDOM(playerId, div);
                 }
@@ -1005,13 +997,27 @@
         }
 
         // ---- 核心战斗逻辑 ----
-        function applyCard(card, ownerPlayerId, targetPlayerId) {
+        function applyCard(card, ownerPlayerId, targetPlayerId, enhanced = false) {
             let dmg = card.atk || 0;
             let heal = card.heal || 0;
             let extra = '';
             let owner = getCurrentMember(ownerPlayerId);
             let target = getCurrentMember(targetPlayerId);
             if (!owner || !target) return { log: '⚠️ 角色不存在', dmg: 0, heal: 0, ownerChange: {}, targetChange: {} };
+
+            // ---- 如果强化，消耗查克拉（仅在房主端） ----
+            if (enhanced) {
+                if (owner.chakra >= 2) {
+                    owner.chakra -= 2;
+                    // 将卡牌数值 +5
+                    if (dmg > 0) dmg += 5;
+                    if (heal > 0) heal += 5;
+                    extra += ' 💪忍术强化！';
+                } else {
+                    extra += ' ⛔查克拉不足，强化失败';
+                    // 依然执行，但无增强效果
+                }
+            }
 
             const beforeOwner = { hp: owner.hp, chakra: owner.chakra, burn: owner.burn, freeze: owner.freeze };
             const beforeTarget = { hp: target.hp, chakra: target.chakra, burn: target.burn, freeze: target.freeze };
@@ -1266,7 +1272,6 @@
             if (result.dmg > 0) showDamageOnTarget(result.targetId, result.dmg, false);
             else if (result.heal > 0) showDamageOnTarget(result.ownerId, result.heal, true);
 
-            // ---- 死亡处理 ----
             handleDeathAfterDamage(result.ownerId);
             handleDeathAfterDamage(result.targetId);
         }
@@ -1299,14 +1304,12 @@
             state.lastPlayedCard[playerKey] = { ...card };
 
             if (lobby.isHost) {
-                const result = applyCard(card, playerId, targetId);
+                const result = applyCard(card, playerId, targetId, false); // 非强化
                 if (result.drawnCard && playerId === localPlayerId) {
                     addCardToDOM(playerId, result.drawnCard);
                 }
-                // 处理死亡
                 handleDeathAfterDamage(result.ownerId);
                 handleDeathAfterDamage(result.targetId);
-                // 广播结果
                 sendAction({ type: 'playCardResult', result: result, cardData: card, playerId: playerId });
                 const role = getCurrentRoleObj(playerId);
                 const roleName = role ? role.emoji + role.name : '玩家' + playerId;
@@ -1314,11 +1317,12 @@
                 if (state.gameOver) { render(); return; }
                 render();
             } else {
-                sendAction({ type: 'playCardRequest', playerId: playerId, cardData: card });
+                sendAction({ type: 'playCardRequest', playerId: playerId, cardData: card, enhanced: false });
                 render();
             }
         }
 
+        // 强化出牌：发送 enhanced: true
         function playCardData(playerId, cardData, enhanced) {
             if (state.gameOver) { log('⛔ 游戏已结束'); return; }
             if (playerId !== state.turn) { log('⛔ 不是你的回合，不能出牌'); return; }
@@ -1334,7 +1338,8 @@
             state.lastPlayedCard[playerKey] = { ...cardData };
 
             if (lobby.isHost) {
-                const result = applyCard(cardData, playerId, targetId);
+                // 房主直接执行，传入 enhanced 参数
+                const result = applyCard(cardData, playerId, targetId, enhanced);
                 if (result.drawnCard && playerId === localPlayerId) {
                     addCardToDOM(playerId, result.drawnCard);
                 }
@@ -1347,7 +1352,8 @@
                 if (state.gameOver) { render(); return; }
                 render();
             } else {
-                sendAction({ type: 'playCardRequest', playerId: playerId, cardData: cardData });
+                // 加入者发送请求，携带 enhanced
+                sendAction({ type: 'playCardRequest', playerId: playerId, cardData: cardData, enhanced: enhanced });
                 render();
             }
         }
@@ -1480,10 +1486,8 @@
             isProcessingTurnEnd = true;
 
             try {
-                // ---- 1. 清除强化状态 ----
                 state.enhancePending = false;
 
-                // ---- 2. 当前回合玩家结算 ----
                 const currentMember = getCurrentMember(state.turn);
                 if (currentMember && currentMember.freeze > 0) {
                     currentMember.freeze--;
@@ -1497,7 +1501,7 @@
                 }
                 if (currentMember) currentMember.discarded = false;
 
-                // ---- 3. 烧伤结算 ----
+                // 烧伤结算
                 [1, 2].forEach(pid => {
                     const member = getCurrentMember(pid);
                     if (member && member.burn > 0) {
@@ -1529,7 +1533,6 @@
                 });
                 if (state.gameOver) { isProcessingTurnEnd = false; return; }
 
-                // ---- 4. 重置技能触发标记 ----
                 const key = state.turn === 1 ? 'p1' : 'p2';
                 state.skillTriggered[key] = {
                     shadow_clone: false,
@@ -1540,21 +1543,17 @@
                     reflect: false
                 };
 
-                // ---- 5. 回合计数 ----
                 if (state.turn === 1) {
                     state.roundCounter++;
                     log(`📊 ===== 第 ${state.roundCounter} 回合开始 =====`);
                 }
 
-                // ---- 6. 切换回合 ----
                 var newTurn = state.turn === 1 ? 2 : 1;
                 state.turn = newTurn;
 
-                // ---- 7. 新回合玩家回血 & 抽牌 ----
                 const newMember = getCurrentMember(state.turn);
                 let turnData = null;
                 if (newMember) {
-                    // 只有存活角色才回血
                     if (newMember.hp > 0) {
                         let healAmount = 1;
                         if (hasSkill(state.turn, 'medical')) {
@@ -1569,11 +1568,9 @@
                         }
                     } else {
                         log(`⚠️ 玩家${state.turn} 当前角色已死亡，跳过回血`);
-                        // 若当前角色死亡，切换到下一个
                         handleDeathAfterDamage(state.turn);
                     }
 
-                    // 抽牌（玩家2第一回合不抽）
                     let drawnCard = null;
                     if (!(state.turn === 2 && state.roundCounter === 1)) {
                         drawnCard = drawOne(state.turn);
@@ -1587,7 +1584,6 @@
                         log('⏭️ 玩家2第一回合不抽牌');
                     }
 
-                    // 构造广播数据
                     turnData = {
                         hp: newMember.hp,
                         chakra: newMember.chakra,
@@ -1600,7 +1596,6 @@
                     };
                 }
 
-                // ---- 8. 广播 ----
                 sendAction({
                     type: 'endTurn',
                     playerId: state.turn,
@@ -1609,7 +1604,6 @@
                     turnData: turnData
                 });
 
-                // ---- 9. 本地渲染 ----
                 render();
                 console.log('✅ 回合结束，当前 turn =', state.turn, 'localPlayerId =', localPlayerId);
             } finally {
@@ -1617,7 +1611,6 @@
             }
         }
 
-        // ---- 客户端调用的 endTurn ----
         function endTurn() {
             if (state.gameOver) { log('⛔ 游戏已结束'); return; }
             if (state.turn !== localPlayerId) {
@@ -1691,8 +1684,10 @@
                     if (lobby.isHost) {
                         const pid = action.playerId;
                         const cardData = action.cardData;
-                        const targetId = pid === 1 ? 2 : 1;
-                        const result = applyCard(cardData, pid, targetId);
+                        const enhanced = action.enhanced || false;
+                        // 验证强化：如果 enhanced 为 true，但查克拉不足，则拒绝执行（但为了友好，我们仍执行但不增强）
+                        // 我们直接传给 applyCard，内部会检查并消耗
+                        const result = applyCard(cardData, pid, pid === 1 ? 2 : 1, enhanced);
                         if (result.drawnCard && pid === localPlayerId) {
                             addCardToDOM(pid, result.drawnCard);
                         }
@@ -1709,7 +1704,7 @@
                 case 'playCardResult': {
                     if (!lobby.isHost) {
                         const result = action.result;
-                        applyCardResult(result); // 内部已调用 handleDeathAfterDamage
+                        applyCardResult(result);
                         const role = getCurrentRoleObj(action.playerId);
                         const roleName = role ? role.emoji + role.name : '玩家' + action.playerId;
                         log(`🧙 ${roleName} 打出 <span class="highlight">${action.cardData.element} ${action.cardData.name}</span> → ${result.log}`);
@@ -2511,7 +2506,7 @@
         });
 
         console.log('🟢 Shinobi Synthesis 同步版 加载完成');
-        console.log('📌 房主统一处理回合切换，出牌伤害后立即切换死亡角色，回血前检查存活状态');
+        console.log('📌 房主统一处理回合切换，出牌伤害后立即切换死亡角色，回血前检查存活状态，强化由房主验证并消耗查克拉');
     </script>
 </body>
 </html>
