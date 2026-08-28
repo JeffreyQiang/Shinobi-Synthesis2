@@ -581,7 +581,8 @@
     <script>
         // ============================================================
         //  Shinobi Synthesis · 同步版
-        //  房主统一处理所有逻辑，加入者仅接收并应用全量状态快照
+        //  房主统一处理，加入者全量同步，彻底杜绝状态不一致
+        //  修复：房主处理加入者出牌请求时，先移除手牌
         // ============================================================
         console.log('🟢 Shinobi Synthesis 同步版 加载中...');
 
@@ -1698,7 +1699,16 @@
                         const pid = action.playerId;
                         const cardData = action.cardData;
                         const enhanced = action.enhanced || false;
-                        const result = applyCard(cardData, pid, pid === 1 ? 2 : 1, enhanced);
+                        // ---- 关键修复：从房主本地玩家手牌中移除该牌 ----
+                        const member = getCurrentMember(pid);
+                        if (member) {
+                            const idx = member.hand.findIndex(c => c.name === cardData.name && c.element === cardData.element);
+                            if (idx !== -1) {
+                                member.hand.splice(idx, 1);
+                            }
+                        }
+                        const targetId = pid === 1 ? 2 : 1;
+                        const result = applyCard(cardData, pid, targetId, enhanced);
                         if (result.drawnCard && pid === localPlayerId) {
                             addCardToDOM(pid, result.drawnCard);
                         }
@@ -1776,7 +1786,6 @@
                 }
                 case 'endTurn': {
                     if (action.fullSnapshot) {
-                        // ---- 全量覆盖状态 ----
                         const snap = action.fullSnapshot;
                         state.teams.p1.members = snap.teams.p1.members.map(m => ({ ...m }));
                         state.teams.p1.currentIndex = snap.teams.p1.currentIndex;
@@ -1785,16 +1794,12 @@
                         state.turn = snap.turn;
                         state.roundCounter = snap.roundCounter;
 
-                        // ---- 完全重建手牌DOM ----
                         clearHandDOM(1);
                         clearHandDOM(2);
                         state.teams.p1.members.forEach((m, idx) => {
                             if (idx === state.teams.p1.currentIndex) {
                                 m.hand.forEach(card => {
-                                    if (state.teams.p1.currentIndex === 0 || state.teams.p1.currentIndex === idx) {
-                                        // 只显示当前活跃角色的手牌
-                                        addCardToDOM(1, card);
-                                    }
+                                    addCardToDOM(1, card);
                                 });
                             }
                         });
