@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shinobi Synthesis · v1.8</title>
+    <title>Shinobi Synthesis · v1.9</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        /* ===== 全局样式 ===== */
+        /* ===== 完整样式 ===== */
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
         body {
             background: #0a0806;
@@ -396,7 +396,7 @@
         <div class="scroll-container">
             <div style="position:relative; z-index:2;">
                 <div class="scroll-title">SHINOBI SYNTHESIS</div>
-                <div class="scroll-sub">忍界大战 · v1.8</div>
+                <div class="scroll-sub">忍界大战 · v1.9</div>
                 <div class="scroll-desc">
                     🃏 基础合成 · 查克拉策略 · 替身术<br>
                     <span>⚔️ 选择你的战斗模式 ⚔️</span>
@@ -635,9 +635,9 @@
 
     <script>
         // ============================================================
-        //  Shinobi Synthesis v1.8  ·  修复 endTurn 被忽略问题
+        //  Shinobi Synthesis v1.9  ·  修复回合切换逻辑
         // ============================================================
-        console.log('🟢 Shinobi Synthesis v1.8 加载中...');
+        console.log('🟢 Shinobi Synthesis v1.9 加载中...');
 
         // ============================================================
         // 1. 音效 & 视觉反馈
@@ -1863,7 +1863,7 @@
         }
 
         // ============================================================
-        // 12. 联机通信层（修复 endTurn 过滤）
+        // 12. 联机通信层（修复 endTurn 切换逻辑）
         // ============================================================
         function sendAction(action) {
             if (lobby.conn && lobby.conn.open) {
@@ -1878,7 +1878,6 @@
             var localPid = lobby.isHost ? 1 : 2;
 
             // 【核心修复】对于 endTurn 消息，不按 playerId 过滤
-            // 对于非 endTurn 消息，如果 playerId 等于本地 ID，则忽略（自己发送的）
             if (action.type !== 'endTurn') {
                 if (action.playerId === localPid) {
                     return;
@@ -1988,7 +1987,8 @@
                     break;
                 }
                 case 'endTurn': {
-                    var newTurn = action.playerId === 1 ? 2 : 1;
+                    // 【核心修复】直接使用 action.playerId 作为新回合玩家
+                    var newTurn = action.playerId;
                     console.log('🔸 收到 endTurn，action.playerId=', action.playerId, '，将 turn 从', gameState.turn, '设为',
                         newTurn);
                     gameState.turn = newTurn;
@@ -2606,8 +2606,8 @@
             console.log('✅ 所有事件绑定完成。');
         });
 
-        console.log('🟢 Shinobi Synthesis v1.8 加载完成！');
-        console.log('📌 版本特性：修复 endTurn 被误判为自身消息而忽略的问题。');
+        console.log('🟢 Shinobi Synthesis v1.9 加载完成！');
+        console.log('📌 版本特性：修复 endTurn 切换逻辑，直接使用 playerId 作为新回合玩家。');
     </script>
 </body>
 </html>
