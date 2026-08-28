@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shinobi Synthesis · 联机修复版</title>
+    <title>Shinobi Synthesis · 联机最终版</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        /* ===== 完整样式 ===== */
+        /* ===== 完整样式（与之前一致） ===== */
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
         body {
             background: #0a0806;
@@ -19,8 +19,6 @@
             background-image: radial-gradient(ellipse at center, #1a1410 0%, #0a0806 100%);
             margin: 0;
         }
-
-        /* ===== 主页 ===== */
         #home-screen {
             position: fixed; inset: 0; z-index: 1000;
             display: flex; align-items: center; justify-content: center;
@@ -57,7 +55,6 @@
         .scroll-footer { font-size: 13px; color: #6a5a4a; letter-spacing: 2px; font-family: 'Noto Serif SC', serif; border-top: 1px solid #3a2a1a; padding-top: 16px; margin-top: 8px; }
         .scroll-footer span { color: #d4a85488; }
 
-        /* ===== 规则书 ===== */
         #rulebook-overlay {
             display: none; position: fixed; inset: 0; z-index: 2000;
             background: rgba(10,8,6,0.95); backdrop-filter: blur(8px);
@@ -88,7 +85,6 @@
         .rulebook-container .chakra { color: #7ab8ff; font-weight: 600; }
         .rulebook-container .rulebook-footer { margin-top: 30px; padding-top: 16px; border-top: 1px solid #3a2a1a; text-align: center; color: #6a5a4a; font-size: 13px; }
 
-        /* ===== 联机大厅 ===== */
         #lobby-screen {
             display: none; position: fixed; inset: 0; z-index: 950;
             background: rgba(10,8,6,0.97); backdrop-filter: blur(8px);
@@ -138,7 +134,6 @@
         .btn-back-home-lobby:hover { background: rgba(212,168,84,0.1); border-color: #d4a854; color: #f5e7b3; }
         .lobby-message { color: #ffd966; font-size: 14px; margin-top: 16px; min-height: 24px; }
 
-        /* ===== 角色选择 ===== */
         #role-select-screen {
             display: none; position: fixed; inset: 0; z-index: 900;
             background: rgba(10,8,6,0.95); backdrop-filter: blur(8px);
@@ -172,7 +167,6 @@
         .role-confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         #ready-status { color: #8a7a6a; font-size: 14px; min-height: 24px; text-align: center; margin-top: 6px; }
 
-        /* ===== 游戏界面 ===== */
         #game-screen {
             display: none; width: 100%; max-width: 1100px; position: relative; z-index: 10;
         }
@@ -297,7 +291,6 @@
         .burn-effect { position: absolute; inset: -4px; border: 3px solid #ff6b6b; border-radius: 24px; box-shadow: 0 0 30px #ff6b6b66, inset 0 0 30px #ff6b6b33; pointer-events: none; animation: burnPulse 0.8s ease-in-out infinite alternate; z-index: 4; background: rgba(255,107,107,0.05); }
         @keyframes burnPulse { 0% { opacity:0.3; } 100% { opacity:0.8; } }
 
-        /* ===== 胜利面板 ===== */
         #victory-overlay {
             display: none; position: fixed; inset: 0; z-index: 3000;
             background: rgba(0,0,0,0.85); backdrop-filter: blur(6px);
@@ -348,7 +341,7 @@
         <div class="scroll-container">
             <div style="position:relative; z-index:2;">
                 <div class="scroll-title">SHINOBI SYNTHESIS</div>
-                <div class="scroll-sub">忍界大战 · 联机修复版</div>
+                <div class="scroll-sub">忍界大战 · 联机最终版</div>
                 <div class="scroll-desc">
                     🃏 基础合成 · 查克拉策略 · 替身术<br>
                     <span>⚔️ 选择你的战斗模式 ⚔️</span>
@@ -372,7 +365,7 @@
         <div class="rulebook-container">
             <button class="close-btn" id="rulebook-close">✕ 关闭</button>
             <h1>📜 忍界大战 · 2v2 规则书</h1>
-            <div class="version">版本 3.1 · 联机修复版 · 7名忍者</div>
+            <div class="version">版本 3.2 · 联机最终版 · 7名忍者</div>
             <h2>🎯 游戏目标</h2>
             <p>每位玩家选择 <strong>2 名忍者</strong> 组成小队。每名忍者拥有 <strong>50 HP</strong>。击败对方所有 2 名忍者即可获胜。</p>
             <h2>⚔️ 战斗规则</h2>
@@ -421,7 +414,7 @@
                 <li><strong>灼烧</strong> — 每回合受到 2 点伤害，持续多层</li>
                 <li><strong>冻结</strong> — 无法行动，可用 1 点查克拉解除</li>
             </ul>
-            <div class="rulebook-footer">🍥 联机修复版 · 固定5房间 · 密码邀请制</div>
+            <div class="rulebook-footer">🍥 联机最终版 · 固定5房间 · 密码邀请制</div>
         </div>
     </div>
 
@@ -587,11 +580,12 @@
 
     <script>
         // ============================================================
-        //  Shinobi Synthesis · 联机修复版 (完整 JavaScript)
+        //  Shinobi Synthesis · 联机最终版 (纯联机，不含本地模式)
+        //  基于 v1.9 稳定版，增加抽牌同步修复
         // ============================================================
-        console.log('🟢 Shinobi Synthesis 联机修复版 加载中...');
+        console.log('🟢 Shinobi Synthesis 联机最终版 加载中...');
 
-        // ---- 1. 音效 & 视觉 ----
+        // ---- 音效 ----
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         let audioCtx = null;
 
@@ -723,7 +717,7 @@
             area.querySelectorAll('.freeze-effect, .burn-effect').forEach(el => el.remove());
         }
 
-        // ---- 2. 核心数据 ----
+        // ---- 核心数据 ----
         const ROLES = {
             naruto: { id: 'naruto', name: '鸣人', emoji: '🍥', faction: '木叶', skill: 'shadow_clone', skillName: '影分身', skillDesc: '每回合第一次受击50%闪避' },
             sasuke: { id: 'sasuke', name: '佐助', emoji: '⚡', faction: '木叶', skill: 'sharingan', skillName: '写轮眼', skillDesc: '每回合第一次伤害+3' },
@@ -749,7 +743,7 @@
             '🌑': { name: '天照', element: '🔥👁️', atk: 12, heal: 0, level: 'advanced' }
         };
 
-        // ---- 3. 游戏状态 ----
+        // ---- 游戏状态 ----
         let selectedRoles = { p1: [], p2: [] };
         let localPlayerId = 1;
         let readyState = { p1: false, p2: false };
@@ -792,7 +786,7 @@
             }
         };
 
-        // ---- 4. DOM 引用 ----
+        // ---- DOM 引用 ----
         const $ = id => document.getElementById(id);
         const logArea = $('log-area');
         const p1HandEl = $('p1-hand');
@@ -822,7 +816,7 @@
         const p1TeamName = $('p1-team-name');
         const p2TeamName = $('p2-team-name');
 
-        // ---- 5. 辅助函数 ----
+        // ---- 辅助函数 ----
         function log(html) {
             const entry = document.createElement('div');
             entry.className = 'log-entry';
@@ -872,7 +866,7 @@
 
         function closeRulebook() { document.getElementById('rulebook-overlay').style.display = 'none'; }
 
-        // ---- 6. 卡牌系统 ----
+        // ---- 卡牌系统 ----
         function drawOne(playerId) {
             const member = getCurrentMember(playerId);
             if (!member) return null;
@@ -986,7 +980,7 @@
             if (member) member.hand = hand;
         }
 
-        // ---- 7. 战斗逻辑 ----
+        // ---- 战斗逻辑 ----
         function applyCard(card, ownerPlayerId, targetPlayerId) {
             let dmg = card.atk || 0;
             let heal = card.heal || 0;
@@ -1338,7 +1332,7 @@
             }
         }
 
-        // ---- 8. 其他游戏函数 ----
+        // ---- 其他游戏函数 ----
         function discardCardFromDOM(playerId, cardElement) {
             if (state.gameOver) { log('⛔ 游戏已结束'); return; }
             if (playerId !== state.turn) { log('⛔ 不是你的回合，不能换牌'); return; }
@@ -1488,7 +1482,7 @@
             overlay.style.display = 'flex';
         }
 
-        // ---- 9. endTurn (修复抽牌同步) ----
+        // ---- 联机专用 endTurn（包含抽牌同步修复） ----
         function endTurn() {
             if (state.gameOver) { log('⛔ 游戏已结束'); return; }
             if (state.turn !== localPlayerId) {
@@ -1562,6 +1556,7 @@
             }
 
             log(`🔄 轮到玩家${state.turn}的回合`);
+            // 发送 endTurn 消息（新回合玩家）
             sendAction({
                 type: 'endTurn',
                 playerId: state.turn,
@@ -1571,7 +1566,7 @@
             console.log('✅ 回合结束，当前 turn =', state.turn, 'localPlayerId =', localPlayerId);
         }
 
-        // ---- 10. 联机通信 ----
+        // ---- 联机通信 ----
         function sendAction(action) {
             if (lobby.conn && lobby.conn.open) {
                 lobby.conn.send(JSON.stringify(action));
@@ -1583,7 +1578,10 @@
 
         function handleRemoteAction(action) {
             var localPid = lobby.isHost ? 1 : 2;
-            if (action.playerId === localPid) return;
+            // 忽略自己发送的消息（除 drawCard 外）
+            if (action.playerId === localPid && action.type !== 'drawCard') {
+                return;
+            }
             console.log('📩 收到远程消息:', action);
 
             switch (action.type) {
@@ -1687,6 +1685,7 @@
                     break;
                 }
                 case 'endTurn': {
+                    // 直接使用 action.playerId 作为新回合玩家
                     var newTurn = action.playerId;
                     console.log('🔸 收到 endTurn，action.playerId=', action.playerId, '，将 turn 从', state.turn, '设为',
                         newTurn);
@@ -1771,7 +1770,7 @@
             }
         }
 
-        // ---- 11. 联机大厅管理 ----
+        // ---- 联机大厅管理 ----
         function updateLobbyUI(message) {
             const label = document.getElementById('lobby-status-label');
             const value = document.getElementById('lobby-status-value');
@@ -1966,7 +1965,7 @@
             updateLobbyUI('对手已断开');
         }
 
-        // ---- 12. 角色选择（联机版） ----
+        // ---- 角色选择（联机版） ----
         function startRoleSelection(role) {
             document.getElementById('lobby-screen').style.display = 'none';
             document.getElementById('role-select-screen').style.display = 'block';
@@ -2162,16 +2161,14 @@
             sendAction({ type: 'startGame' });
         }
 
-        // ---- 13. AI 模式（保留但仅用于单人） ----
+        // ---- AI 模式（仅作占位，实际未实现） ----
         function startLocalGame(mode) {
-            // 如果用户点击 AI，简单处理，只开启本地 AI 模式（不涉及联机）
             if (mode === 'ai') {
-                // 快速开始 AI 模式（略，可参考之前版本）
-                alert('AI 模式简化版，请使用联机模式进行对战。');
+                alert('AI 模式暂未在此版本实现，请使用联机模式。');
             }
         }
 
-        // ---- 14. 渲染 ----
+        // ---- 渲染 ----
         function render() {
             // 队伍状态
             [1, 2].forEach(pid => {
@@ -2263,12 +2260,6 @@
                         p2Overlay.querySelector('.back-text') && (p2Overlay.querySelector('.back-text').textContent = '🃏 对手手牌');
                     }
                 }
-            } else {
-                // 非联机（AI/双人同屏）使用原有遮罩逻辑（此处不再实现，因为此版本仅为联机）
-                if (p1Overlay) {
-                    p1Overlay.classList.remove('show');
-                    p2Overlay.classList.add('show');
-                }
             }
             if (state.gameOver) {
                 if (p1Overlay) p1Overlay.classList.remove('show');
@@ -2356,7 +2347,7 @@
             render();
         }
 
-        // ---- 15. 初始化事件 ----
+        // ---- 初始化事件 ----
         document.addEventListener('DOMContentLoaded', function() {
             // 主页按钮
             document.getElementById('btn-lobby').addEventListener('click', function() {
@@ -2486,8 +2477,8 @@
             render();
         });
 
-        console.log('🟢 Shinobi Synthesis 联机修复版 加载完成');
-        console.log('📌 修复了回合开始抽牌不同步的问题');
+        console.log('🟢 Shinobi Synthesis 联机最终版 加载完成');
+        console.log('📌 修复回合切换和抽牌同步，基于稳定 v1.9 核心');
     </script>
 </body>
 </html>
