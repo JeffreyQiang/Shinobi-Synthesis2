@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shinobi Synthesis · 联机最终版</title>
+    <title>Shinobi Synthesis · 联机最终修复版</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        /* ===== 完整样式（与之前一致） ===== */
+        /* ===== 完整样式（与之前完全一致） ===== */
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
         body {
             background: #0a0806;
@@ -341,7 +341,7 @@
         <div class="scroll-container">
             <div style="position:relative; z-index:2;">
                 <div class="scroll-title">SHINOBI SYNTHESIS</div>
-                <div class="scroll-sub">忍界大战 · 联机最终版</div>
+                <div class="scroll-sub">忍界大战 · 最终修复版</div>
                 <div class="scroll-desc">
                     🃏 基础合成 · 查克拉策略 · 替身术<br>
                     <span>⚔️ 选择你的战斗模式 ⚔️</span>
@@ -365,7 +365,7 @@
         <div class="rulebook-container">
             <button class="close-btn" id="rulebook-close">✕ 关闭</button>
             <h1>📜 忍界大战 · 2v2 规则书</h1>
-            <div class="version">版本 3.2 · 联机最终版 · 7名忍者</div>
+            <div class="version">版本 3.3 · 最终修复版 · 7名忍者</div>
             <h2>🎯 游戏目标</h2>
             <p>每位玩家选择 <strong>2 名忍者</strong> 组成小队。每名忍者拥有 <strong>50 HP</strong>。击败对方所有 2 名忍者即可获胜。</p>
             <h2>⚔️ 战斗规则</h2>
@@ -414,7 +414,7 @@
                 <li><strong>灼烧</strong> — 每回合受到 2 点伤害，持续多层</li>
                 <li><strong>冻结</strong> — 无法行动，可用 1 点查克拉解除</li>
             </ul>
-            <div class="rulebook-footer">🍥 联机最终版 · 固定5房间 · 密码邀请制</div>
+            <div class="rulebook-footer">🍥 最终修复版 · 固定5房间 · 密码邀请制</div>
         </div>
     </div>
 
@@ -580,10 +580,10 @@
 
     <script>
         // ============================================================
-        //  Shinobi Synthesis · 联机最终版 (纯联机，不含本地模式)
-        //  基于 v1.9 稳定版，增加抽牌同步修复
+        //  Shinobi Synthesis · 联机最终修复版
+        //  修复：端Turn被误丢弃（senderId过滤）
         // ============================================================
-        console.log('🟢 Shinobi Synthesis 联机最终版 加载中...');
+        console.log('🟢 Shinobi Synthesis 最终修复版 加载中...');
 
         // ---- 音效 ----
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -1556,11 +1556,12 @@
             }
 
             log(`🔄 轮到玩家${state.turn}的回合`);
-            // 发送 endTurn 消息（新回合玩家）
+            // 发送 endTurn 消息（新回合玩家），并带上 senderId
             sendAction({
                 type: 'endTurn',
                 playerId: state.turn,
-                roundCounter: state.roundCounter
+                roundCounter: state.roundCounter,
+                senderId: localPlayerId  // 关键修复：标记发送者
             });
             render();
             console.log('✅ 回合结束，当前 turn =', state.turn, 'localPlayerId =', localPlayerId);
@@ -1578,8 +1579,9 @@
 
         function handleRemoteAction(action) {
             var localPid = lobby.isHost ? 1 : 2;
-            // 忽略自己发送的消息（除 drawCard 外）
-            if (action.playerId === localPid && action.type !== 'drawCard') {
+            // ---- 关键修复：用 senderId 过滤，而不是 playerId ----
+            if (action.senderId && action.senderId === localPid) {
+                console.log('⏭️ 忽略自己发送的消息', action);
                 return;
             }
             console.log('📩 收到远程消息:', action);
@@ -2161,7 +2163,7 @@
             sendAction({ type: 'startGame' });
         }
 
-        // ---- AI 模式（仅作占位，实际未实现） ----
+        // ---- AI 模式（仅作占位） ----
         function startLocalGame(mode) {
             if (mode === 'ai') {
                 alert('AI 模式暂未在此版本实现，请使用联机模式。');
@@ -2477,8 +2479,8 @@
             render();
         });
 
-        console.log('🟢 Shinobi Synthesis 联机最终版 加载完成');
-        console.log('📌 修复回合切换和抽牌同步，基于稳定 v1.9 核心');
+        console.log('🟢 Shinobi Synthesis 最终修复版 加载完成');
+        console.log('📌 修复了 endTurn 被误丢弃的问题 (使用 senderId 过滤)');
     </script>
 </body>
 </html>
