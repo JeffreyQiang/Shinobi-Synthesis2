@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shinobi Synthesis · v1.7</title>
+    <title>Shinobi Synthesis · v1.8</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         /* ===== 全局样式 ===== */
@@ -19,8 +19,6 @@
             background-image: radial-gradient(ellipse at center, #1a1410 0%, #0a0806 100%);
             margin: 0;
         }
-
-        /* ===== 主页 ===== */
         #home-screen {
             position: fixed; inset: 0; z-index: 1000;
             display: flex; align-items: center; justify-content: center;
@@ -79,7 +77,6 @@
         }
         .scroll-footer span { color: #d4a85488; }
 
-        /* ===== 规则书 ===== */
         #rulebook-overlay {
             display: none; position: fixed; inset: 0; z-index: 2000;
             background: rgba(10,8,6,0.95); backdrop-filter: blur(8px);
@@ -121,7 +118,6 @@
         .rulebook-container .chakra { color: #7ab8ff; font-weight: 600; }
         .rulebook-container .rulebook-footer { margin-top: 30px; padding-top: 16px; border-top: 1px solid #3a2a1a; text-align: center; color: #6a5a4a; font-size: 13px; }
 
-        /* ===== 联机大厅 ===== */
         #lobby-screen {
             display: none; position: fixed; inset: 0; z-index: 900;
             background: rgba(10,8,6,0.97); backdrop-filter: blur(8px);
@@ -191,7 +187,6 @@
             min-height: 24px;
         }
 
-        /* ===== 角色选择 ===== */
         #role-select-screen {
             display: none; position: fixed; inset: 0; z-index: 950;
             background: rgba(10,8,6,0.95); backdrop-filter: blur(8px);
@@ -227,7 +222,6 @@
             color: #8a7a6a; font-size: 14px; min-height: 24px; text-align: center; margin-top: 6px;
         }
 
-        /* ===== 游戏界面 ===== */
         #game-screen {
             display: none; width: 100%; max-width: 1100px; position: relative; z-index: 10;
         }
@@ -352,7 +346,6 @@
         .burn-effect { position: absolute; inset: -4px; border: 3px solid #ff6b6b; border-radius: 24px; box-shadow: 0 0 30px #ff6b6b66, inset 0 0 30px #ff6b6b33; pointer-events: none; animation: burnPulse 0.8s ease-in-out infinite alternate; z-index: 4; background: rgba(255,107,107,0.05); }
         @keyframes burnPulse { 0% { opacity:0.3; } 100% { opacity:0.8; } }
 
-        /* ===== 胜利面板 ===== */
         #victory-overlay {
             display: none; position: fixed; inset: 0; z-index: 3000;
             background: rgba(0,0,0,0.85); backdrop-filter: blur(6px);
@@ -403,7 +396,7 @@
         <div class="scroll-container">
             <div style="position:relative; z-index:2;">
                 <div class="scroll-title">SHINOBI SYNTHESIS</div>
-                <div class="scroll-sub">忍界大战 · v1.7</div>
+                <div class="scroll-sub">忍界大战 · v1.8</div>
                 <div class="scroll-desc">
                     🃏 基础合成 · 查克拉策略 · 替身术<br>
                     <span>⚔️ 选择你的战斗模式 ⚔️</span>
@@ -642,9 +635,9 @@
 
     <script>
         // ============================================================
-        //  Shinobi Synthesis v1.7  ·  终极可靠性修复  ·  消息重发 + ACK
+        //  Shinobi Synthesis v1.8  ·  修复 endTurn 被忽略问题
         // ============================================================
-        console.log('🟢 Shinobi Synthesis v1.7 加载中...');
+        console.log('🟢 Shinobi Synthesis v1.8 加载中...');
 
         // ============================================================
         // 1. 音效 & 视觉反馈
@@ -1499,7 +1492,7 @@
         }
 
         // ============================================================
-        // 9. endTurn（带重发机制 + ACK）
+        // 9. endTurn（带重发 + senderId）
         // ============================================================
         var endTurnRetryCount = 0;
         var endTurnRetryTimer = null;
@@ -1588,11 +1581,12 @@
 
             log('🔄 轮到玩家' + gameState.turn + '的回合');
 
-            // 发送 endTurn 消息（带重发机制）
+            // 发送 endTurn 消息（增加 senderId）
             var msg = {
                 type: 'endTurn',
                 playerId: gameState.turn,
-                roundCounter: gameState.roundCounter
+                roundCounter: gameState.roundCounter,
+                senderId: lobby.isHost ? 1 : 2
             };
             endTurnAckReceived = false;
             endTurnRetryCount = 0;
@@ -1652,7 +1646,7 @@
         }
 
         // ============================================================
-        // 11. 渲染（含身份检查）
+        // 11. 渲染
         // ============================================================
         function render() {
             // 强制修正身份
@@ -1666,7 +1660,7 @@
             }
             console.log('🔸 render 开始，turn =', gameState.turn, 'localPlayerId =', localPlayerId);
 
-            // 更新队伍存活状态
+            // 更新队伍状态
             [1, 2].forEach(function(pid) {
                 var team = getTeam(pid);
                 var alive = getAliveCount(team);
@@ -1869,7 +1863,7 @@
         }
 
         // ============================================================
-        // 12. 联机通信层（含 ACK 处理）
+        // 12. 联机通信层（修复 endTurn 过滤）
         // ============================================================
         function sendAction(action) {
             if (lobby.conn && lobby.conn.open) {
@@ -1882,15 +1876,21 @@
 
         function handleRemoteAction(action) {
             var localPid = lobby.isHost ? 1 : 2;
-            // 如果是自己发送的 endTurn，忽略（但加入者发送的 endTurn 会被处理）
-            if (action.playerId === localPid) {
-                // 但如果是房主自己发送的 endTurn，忽略，避免重复切换
-                if (action.type === 'endTurn' && lobby.isHost) {
+
+            // 【核心修复】对于 endTurn 消息，不按 playerId 过滤
+            // 对于非 endTurn 消息，如果 playerId 等于本地 ID，则忽略（自己发送的）
+            if (action.type !== 'endTurn') {
+                if (action.playerId === localPid) {
+                    return;
+                }
+            } else {
+                // 如果是自己发送的 endTurn（通过 senderId 判断），忽略
+                if (action.senderId && action.senderId === localPid) {
                     console.log('⏭️ 忽略自己发送的 endTurn');
                     return;
                 }
-                return;
             }
+
             console.log('📩 收到远程消息:', action);
 
             switch (action.type) {
@@ -1988,7 +1988,6 @@
                     break;
                 }
                 case 'endTurn': {
-                    // 收到对手的结束回合消息，强制更新回合
                     var newTurn = action.playerId === 1 ? 2 : 1;
                     console.log('🔸 收到 endTurn，action.playerId=', action.playerId, '，将 turn 从', gameState.turn, '设为',
                         newTurn);
@@ -1997,7 +1996,7 @@
                     log('🔄 轮到玩家' + gameState.turn + '的回合');
                     render();
                     console.log('✅ 处理 endTurn 后，当前 turn =', gameState.turn, 'localPlayerId =', localPlayerId);
-                    // 发送 ACK 确认收到
+                    // 发送 ACK
                     if (lobby.conn && lobby.conn.open) {
                         lobby.conn.send(JSON.stringify({ type: 'endTurnAck', playerId: localPlayerId }));
                         console.log('📤 发送 endTurnAck');
@@ -2005,7 +2004,6 @@
                     break;
                 }
                 case 'endTurnAck': {
-                    // 房主收到加入者的确认，取消重发
                     console.log('✅ 收到 endTurnAck');
                     endTurnAckReceived = true;
                     if (endTurnRetryTimer) {
@@ -2608,8 +2606,8 @@
             console.log('✅ 所有事件绑定完成。');
         });
 
-        console.log('🟢 Shinobi Synthesis v1.7 加载完成！');
-        console.log('📌 版本特性：回合消息重发 + ACK 确认，彻底解决丢包问题。');
+        console.log('🟢 Shinobi Synthesis v1.8 加载完成！');
+        console.log('📌 版本特性：修复 endTurn 被误判为自身消息而忽略的问题。');
     </script>
 </body>
 </html>
