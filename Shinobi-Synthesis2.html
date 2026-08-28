@@ -1463,7 +1463,7 @@
             overlay.style.display = 'flex';
         }
 
-        // ---- 联机专用 endTurn（包含抽牌同步修复） ----
+        // ---- 联机专用 endTurn（房主统一执行回血、抽牌，并广播数据） ----
         function endTurn() {
             if (state.gameOver) { log('⛔ 游戏已结束'); return; }
             if (state.turn !== localPlayerId) {
@@ -1484,8 +1484,40 @@
                 btnDiscard.classList.remove('active');
             }
             if (currentMember) currentMember.discarded = false;
-            applyBurns();
-            if (state.gameOver) { render(); return; }
+
+            // ---- 烧伤结算（仅房主执行） ----
+            if (lobby.isHost) {
+                [1, 2].forEach(pid => {
+                    const member = getCurrentMember(pid);
+                    if (member && member.burn > 0) {
+                        const burnDmg = 2;
+                        member.hp = Math.max(0, member.hp - burnDmg);
+                        if (pid === 1) state.totalBurnDamage.p1 += burnDmg;
+                        else state.totalBurnDamage.p2 += burnDmg;
+                        member.burn--;
+                        log(`🔥 玩家${pid}灼烧 -${burnDmg}`);
+                        if (member.burn === 0) clearStateEffects(pid);
+                        if (member.hp <= 0) {
+                            member.hp = 0;
+                            const team = getTeam(pid);
+                            const roleName = ROLES[member.roleId]?.emoji + ROLES[member.roleId]?.name || '角色';
+                            log(`💀 ${roleName} 阵亡！`);
+                            switchToNextAlive(pid);
+                            if (getAliveCount(team) === 0) {
+                                state.gameOver = true;
+                                const winner = pid === 1 ? 2 : 1;
+                                log(`💀 玩家${pid}小队全灭！玩家${winner}胜利！`);
+                                showVictory(winner);
+                                render();
+                                // 广播游戏结束
+                                sendAction({ type: 'gameOver', winner: winner });
+                                return;
+                            }
+                        }
+                    }
+                });
+                if (state.gameOver) return;
+            }
 
             const key = state.turn === 1 ? 'p1' : 'p2';
             state.skillTriggered[key] = {
@@ -1505,41 +1537,61 @@
             var newTurn = state.turn === 1 ? 2 : 1;
             state.turn = newTurn;
 
-            // 新回合玩家抽牌、回血
-            const newMember = getCurrentMember(state.turn);
-            if (newMember) {
-                let healAmount = 1;
-                if (hasSkill(state.turn, 'medical')) {
-                    healAmount = 2;
-                    log(`🌸 小樱 医疗天赋：回血+1`);
-                }
-                const oldHp = newMember.hp;
-                newMember.hp = Math.min(newMember.maxHp, newMember.hp + healAmount);
-                if (newMember.hp > oldHp) {
-                    log(`💚 玩家${state.turn} 恢复${healAmount}HP (当前 ${newMember.hp})`);
-                }
+            // ---- 新回合玩家回血、抽牌（仅房主执行） ----
+            let turnData = null; // 用于广播
+            if (lobby.isHost) {
+                const newMember = getCurrentMember(state.turn);
+                if (newMember) {
+                    let healAmount = 1;
+                    if (hasSkill(state.turn, 'medical')) {
+                        healAmount = 2;
+                        log(`🌸 小樱 医疗天赋：回血+1`);
+                    }
+                    const oldHp = newMember.hp;
+                    newMember.hp = Math.min(newMember.maxHp, newMember.hp + healAmount);
+                    const actualHeal = newMember.hp - oldHp;
+                    if (actualHeal > 0) {
+                        log(`💚 玩家${state.turn} 恢复${healAmount}HP (当前 ${newMember.hp})`);
+                    }
 
-                if (!(state.turn === 2 && state.roundCounter === 1)) {
-                    if (state.turn === localPlayerId) {
-                        const newCard = drawOne(state.turn);
-                        if (newCard) {
-                            addCardToDOM(state.turn, newCard);
+                    // 抽牌（第一回合玩家2不抽）
+                    let drawnCard = null;
+                    if (!(state.turn === 2 && state.roundCounter === 1)) {
+                        drawnCard = drawOne(state.turn);
+                        if (drawnCard) {
+                            if (state.turn === localPlayerId) {
+                                addCardToDOM(state.turn, drawnCard);
+                            }
+                            log(`🃏 玩家${state.turn} 抽到 ${drawnCard.element} ${drawnCard.name}`);
                         }
                     } else {
-                        sendAction({ type: 'drawCard', playerId: state.turn });
+                        log('⏭️ 玩家2第一回合不抽牌');
                     }
-                } else {
-                    log('⏭️ 玩家2第一回合不抽牌');
+
+                    // 构造广播数据
+                    turnData = {
+                        hp: newMember.hp,
+                        chakra: newMember.chakra,
+                        burn: newMember.burn,
+                        freeze: newMember.freeze,
+                        hand: newMember.hand.map(c => ({ ...c })), // 深拷贝
+                        drawnCard: drawnCard ? { ...drawnCard } : null,
+                        roundCounter: state.roundCounter,
+                        turn: state.turn
+                    };
                 }
             }
 
-            log(`🔄 轮到玩家${state.turn}的回合`);
+            // ---- 广播 endTurn（房主发送完整数据） ----
             sendAction({
                 type: 'endTurn',
                 playerId: state.turn,
                 roundCounter: state.roundCounter,
-                senderId: localPlayerId
+                senderId: localPlayerId,
+                turnData: turnData
             });
+
+            // ---- 本地渲染 ----
             render();
             console.log('✅ 回合结束，当前 turn =', state.turn, 'localPlayerId =', localPlayerId);
         }
@@ -1672,12 +1724,33 @@
                     break;
                 }
                 case 'endTurn': {
-                    var newTurn = action.playerId;
-                    console.log('🔸 收到 endTurn，action.playerId=', action.playerId, '，将 turn 从', state.turn, '设为',
-                        newTurn);
-                    state.turn = newTurn;
-                    state.roundCounter = action.roundCounter || state.roundCounter;
-                    log(`🔄 轮到玩家${state.turn}的回合`);
+                    // 如果消息包含 turnData，说明是房主广播的完整数据
+                    if (action.turnData) {
+                        // 应用数据到当前玩家（即新回合玩家）
+                        const targetPid = action.turnData.turn; // 或 action.playerId
+                        const member = getCurrentMember(targetPid);
+                        if (member) {
+                            member.hp = action.turnData.hp;
+                            member.chakra = action.turnData.chakra;
+                            member.burn = action.turnData.burn;
+                            member.freeze = action.turnData.freeze;
+                            // 更新手牌（直接替换）
+                            member.hand = action.turnData.hand;
+                            // 如果抽到牌，且该玩家是本地玩家，则添加到DOM
+                            if (action.turnData.drawnCard && targetPid === localPlayerId) {
+                                addCardToDOM(targetPid, action.turnData.drawnCard);
+                            }
+                        }
+                        // 更新回合和轮次
+                        state.turn = action.turnData.turn;
+                        state.roundCounter = action.turnData.roundCounter;
+                        log(`🔄 轮到玩家${state.turn}的回合`);
+                    } else {
+                        // 兼容旧版本（加入者发送的简易消息）——不做状态变更，仅更新回合
+                        state.turn = action.playerId;
+                        state.roundCounter = action.roundCounter || state.roundCounter;
+                        log(`🔄 轮到玩家${state.turn}的回合`);
+                    }
                     render();
                     break;
                 }
