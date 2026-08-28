@@ -582,7 +582,7 @@
         // ============================================================
         //  Shinobi Synthesis · 同步版
         //  房主统一处理，加入者全量同步，彻底杜绝状态不一致
-        //  修复：房主处理加入者出牌请求时，先移除手牌
+        //  修复双重抽牌问题：applyCard返回完整手牌，applyCardResult直接替换
         // ============================================================
         console.log('🟢 Shinobi Synthesis 同步版 加载中...');
 
@@ -942,7 +942,6 @@
                 if (state.discardMode) { log('💡 点击 ✕ 换牌'); return; }
                 if (playerId !== state.turn) { log('⛔ 这不是你的回合！'); return; }
                 if (state.enhancePending) {
-                    // 强化：客户端不消耗查克拉，发送 enhanced 标志
                     state.enhancePending = false;
                     const cardData = {
                         name: card.name,
@@ -1002,6 +1001,9 @@
             let target = getCurrentMember(targetPlayerId);
             if (!owner || !target) return { log: '⚠️ 角色不存在', dmg: 0, heal: 0, ownerChange: {}, targetChange: {} };
 
+            // 保存原始手牌以便后续返回完整列表
+            const originalHand = owner.hand.map(c => ({ ...c }));
+
             if (enhanced) {
                 if (owner.chakra >= 2) {
                     owner.chakra -= 2;
@@ -1036,8 +1038,7 @@
                 } else if (card.element === '⚡⚡') {
                     if (owner.hand.length < 4) {
                         const newCard = drawOne(ownerPlayerId);
-                        if (newCard) { addCardToDOM(ownerPlayerId, newCard);
-                            extra += ' 📜抽1张牌'; } else { extra += ' ⚠️手牌已满'; }
+                        if (newCard) { extra += ' 📜抽1张牌'; } else { extra += ' ⚠️手牌已满'; }
                     } else { extra += ' ⚠️手牌已满'; }
                 } else if (card.element === '🔥👁️') {
                     if (dmg > 0) {
@@ -1192,6 +1193,7 @@
             const afterOwner = { hp: owner.hp, chakra: owner.chakra, burn: owner.burn, freeze: owner.freeze };
             const afterTarget = { hp: target.hp, chakra: target.chakra, burn: target.burn, freeze: target.freeze };
 
+            // 构造结果，包含完整的owner手牌（替换）
             const result = {
                 log: extra,
                 dmg: actualDmg,
@@ -1216,6 +1218,8 @@
                     finalBurn: afterTarget.burn,
                     finalFreeze: afterTarget.freeze
                 },
+                ownerHand: owner.hand.map(c => ({ ...c })), // 完整手牌
+                targetHand: target.hand.map(c => ({ ...c })), // 一般不变，但为了完整
                 dodged: dodged,
                 samehadaTriggered: samehadaTriggered,
                 reflectTriggered: reflectTriggered,
@@ -1236,6 +1240,7 @@
             const target = getCurrentMember(result.targetId);
             if (!owner || !target) return;
 
+            // 应用血量、查克拉、状态
             owner.hp = result.ownerChange.finalHp;
             owner.chakra = result.ownerChange.finalChakra;
             owner.burn = result.ownerChange.finalBurn;
@@ -1246,6 +1251,7 @@
             target.burn = result.targetChange.finalBurn;
             target.freeze = result.targetChange.finalFreeze;
 
+            // 更新统计
             if (result.dmg > 0) {
                 if (result.ownerId === 1) state.totalDamage.p1 += result.dmg;
                 else state.totalDamage.p2 += result.dmg;
@@ -1255,10 +1261,24 @@
                 else state.totalHeal.p2 += result.heal;
             }
 
-            if (result.drawnCard) {
-                owner.hand.push(result.drawnCard);
+            // ---- 关键：替换手牌 ----
+            if (result.ownerHand) {
+                owner.hand = result.ownerHand.map(c => ({ ...c }));
+                // 如果该玩家是本地玩家，重绘其手牌DOM
                 if (result.ownerId === localPlayerId) {
-                    addCardToDOM(result.ownerId, result.drawnCard);
+                    clearHandDOM(result.ownerId);
+                    owner.hand.forEach(card => {
+                        addCardToDOM(result.ownerId, card);
+                    });
+                }
+            }
+            if (result.targetHand) {
+                target.hand = result.targetHand.map(c => ({ ...c }));
+                if (result.targetId === localPlayerId) {
+                    clearHandDOM(result.targetId);
+                    target.hand.forEach(card => {
+                        addCardToDOM(result.targetId, card);
+                    });
                 }
             }
 
@@ -1298,15 +1318,27 @@
 
             if (lobby.isHost) {
                 const result = applyCard(card, playerId, targetId, false);
-                if (result.drawnCard && playerId === localPlayerId) {
-                    addCardToDOM(playerId, result.drawnCard);
-                }
-                handleDeathAfterDamage(result.ownerId);
-                handleDeathAfterDamage(result.targetId);
+                // 房主本地已经修改了手牌，但为了同步，我们发送结果给加入者，加入者将用result.ownerHand覆盖
                 sendAction({ type: 'playCardResult', result: result, cardData: card, playerId: playerId });
                 const role = getCurrentRoleObj(playerId);
                 const roleName = role ? role.emoji + role.name : '玩家' + playerId;
                 log(`🧙 ${roleName} 打出 <span class="highlight">${card.element} ${card.name}</span> → ${result.log}`);
+                // 房主本地手牌已经更新，但为了加入者同步，我们也要将结果应用到本地吗？因为房主已经在applyCard中修改了，不需要再应用，但为了统一，我们可以也调用applyCardResult，但会重复修改，所以不调用。
+                // 但需要更新DOM，因为addCardToDOM在applyCard中可能已经添加了抽到的牌，但房主本地DOM应该已经更新，因为applyCard中调用了drawOne并push，但DOM未更新，所以需要更新。
+                // 我们可以在applyCard中不添加DOM，在结果返回后统一由调用者处理。但为了简化，我们在房主本地直接更新DOM。
+                // 但在applyCard中我们调用了drawOne，但drawOne没有添加DOM，所以我们在这里需要添加。
+                // 检查result.drawnCard，如果是房主自己抽的，需要添加DOM。
+                if (result.drawnCard && playerId === localPlayerId) {
+                    addCardToDOM(playerId, result.drawnCard);
+                }
+                // 另外，房主自己的手牌DOM需要完全刷新，因为可能被合成等操作改变。
+                // 但applyCard中已经修改了owner.hand，我们只需确保DOM与owner.hand一致。
+                // 我们可以在applyCard后，重新渲染该玩家的手牌DOM。
+                clearHandDOM(playerId);
+                getCurrentMember(playerId).hand.forEach(c => addCardToDOM(playerId, c));
+
+                handleDeathAfterDamage(result.ownerId);
+                handleDeathAfterDamage(result.targetId);
                 if (state.gameOver) { render(); return; }
                 render();
             } else {
@@ -1331,15 +1363,17 @@
 
             if (lobby.isHost) {
                 const result = applyCard(cardData, playerId, targetId, enhanced);
-                if (result.drawnCard && playerId === localPlayerId) {
-                    addCardToDOM(playerId, result.drawnCard);
-                }
-                handleDeathAfterDamage(result.ownerId);
-                handleDeathAfterDamage(result.targetId);
                 sendAction({ type: 'playCardResult', result: result, cardData: cardData, playerId: playerId });
                 const role = getCurrentRoleObj(playerId);
                 const roleName = role ? role.emoji + role.name : '玩家' + playerId;
                 log(`🧙 ${roleName} 打出 <span class="highlight">${cardData.element} ${cardData.name}</span> → ${result.log}`);
+                if (result.drawnCard && playerId === localPlayerId) {
+                    addCardToDOM(playerId, result.drawnCard);
+                }
+                clearHandDOM(playerId);
+                getCurrentMember(playerId).hand.forEach(c => addCardToDOM(playerId, c));
+                handleDeathAfterDamage(result.ownerId);
+                handleDeathAfterDamage(result.targetId);
                 if (state.gameOver) { render(); return; }
                 render();
             } else {
@@ -1699,7 +1733,7 @@
                         const pid = action.playerId;
                         const cardData = action.cardData;
                         const enhanced = action.enhanced || false;
-                        // ---- 关键修复：从房主本地玩家手牌中移除该牌 ----
+                        // ---- 房主本地移除该牌（因为加入者已经移除了，但房主尚未移除，需同步） ----
                         const member = getCurrentMember(pid);
                         if (member) {
                             const idx = member.hand.findIndex(c => c.name === cardData.name && c.element === cardData.element);
@@ -1709,9 +1743,12 @@
                         }
                         const targetId = pid === 1 ? 2 : 1;
                         const result = applyCard(cardData, pid, targetId, enhanced);
+                        // 房主本地更新DOM
                         if (result.drawnCard && pid === localPlayerId) {
                             addCardToDOM(pid, result.drawnCard);
                         }
+                        clearHandDOM(pid);
+                        getCurrentMember(pid).hand.forEach(c => addCardToDOM(pid, c));
                         handleDeathAfterDamage(result.ownerId);
                         handleDeathAfterDamage(result.targetId);
                         sendAction({ type: 'playCardResult', result: result, cardData: cardData, playerId: pid });
